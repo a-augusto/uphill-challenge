@@ -13,3 +13,17 @@ services:
       - 'POSTGRES_USER=myuser'
     ports:
       - '5432'
+  wiremock:
+    image: 'wiremock/wiremock:latest'
+    command: ['--global-response-templating', '--verbose']
+    volumes:
+      - './wiremock/mappings:/home/wiremock/mappings'
+    ports:
+      - '8081:8080'
+  greenmail:
+    image: 'greenmail/standalone:latest'
+    environment:
+      - 'GREENMAIL_OPTS=-Dgreenmail.setup.test.smtp -Dgreenmail.hostname=0.0.0.0 -Dgreenmail.verbose'
+    ports:
+      - '3025:3025'
+      - '8082:8080'

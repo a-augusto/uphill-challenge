@@ -16,7 +16,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 
 import com.uphill.appointments.entity.Appointment;
 import com.uphill.appointments.entity.Doctor;
-import com.uphill.appointments.entity.PatientInfo;
+import com.uphill.appointments.entity.Patient;
 import com.uphill.appointments.entity.Room;
 import com.uphill.appointments.entity.Specialty;
 import com.uphill.appointments.support.TestcontainersConfig;
@@ -40,18 +40,21 @@ class AppointmentRepositoryTest {
     private RoomRepository roomRepository;
     @Autowired
     private SpecialtyRepository specialtyRepository;
+    @Autowired
+    private PatientRepository patientRepository;
 
     @Test
     void rejectsSecondAppointmentForSameDoctorAtSameSlot() {
         Specialty cardiology = specialtyRepository.findByCode("CARDIOLOGY").orElseThrow();
+        Patient patient = patientRepository.findByPatientId("PAT-0001").orElseThrow();
         Doctor doctor = doctorRepository.findBySpecialtyAndActiveTrue(cardiology).getFirst();
         Room room1 = roomRepository.findByActiveTrue().get(0);
         Room room2 = roomRepository.findByActiveTrue().get(1);
         Instant startsAt = futureSlot();
 
-        appointmentRepository.saveAndFlush(newAppointment(cardiology, doctor, room1, startsAt));
+        appointmentRepository.saveAndFlush(newAppointment(patient, cardiology, doctor, room1, startsAt));
 
-        Appointment conflicting = newAppointment(cardiology, doctor, room2, startsAt);
+        Appointment conflicting = newAppointment(patient, cardiology, doctor, room2, startsAt);
         assertThatThrownBy(() -> appointmentRepository.saveAndFlush(conflicting))
                 .isInstanceOf(DataIntegrityViolationException.class);
     }
@@ -59,14 +62,15 @@ class AppointmentRepositoryTest {
     @Test
     void rejectsSecondAppointmentForSameRoomAtSameSlot() {
         Specialty cardiology = specialtyRepository.findByCode("CARDIOLOGY").orElseThrow();
+        Patient patient = patientRepository.findByPatientId("PAT-0001").orElseThrow();
         Doctor doctorA = doctorRepository.findBySpecialtyAndActiveTrue(cardiology).get(0);
         Doctor doctorB = doctorRepository.findBySpecialtyAndActiveTrue(cardiology).get(1);
         Room room = roomRepository.findByActiveTrue().getFirst();
         Instant startsAt = futureSlot();
 
-        appointmentRepository.saveAndFlush(newAppointment(cardiology, doctorA, room, startsAt));
+        appointmentRepository.saveAndFlush(newAppointment(patient, cardiology, doctorA, room, startsAt));
 
-        Appointment conflicting = newAppointment(cardiology, doctorB, room, startsAt);
+        Appointment conflicting = newAppointment(patient, cardiology, doctorB, room, startsAt);
         assertThatThrownBy(() -> appointmentRepository.saveAndFlush(conflicting))
                 .isInstanceOf(DataIntegrityViolationException.class);
     }
@@ -74,21 +78,24 @@ class AppointmentRepositoryTest {
     @Test
     void allowsDifferentDoctorAndRoomAtSameSlot() {
         Specialty cardiology = specialtyRepository.findByCode("CARDIOLOGY").orElseThrow();
+        Patient patient = patientRepository.findByPatientId("PAT-0001").orElseThrow();
         Doctor doctorA = doctorRepository.findBySpecialtyAndActiveTrue(cardiology).get(0);
         Doctor doctorB = doctorRepository.findBySpecialtyAndActiveTrue(cardiology).get(1);
         Room room1 = roomRepository.findByActiveTrue().get(0);
         Room room2 = roomRepository.findByActiveTrue().get(1);
         Instant startsAt = futureSlot();
 
-        appointmentRepository.saveAndFlush(newAppointment(cardiology, doctorA, room1, startsAt));
-        Appointment second = appointmentRepository.saveAndFlush(newAppointment(cardiology, doctorB, room2, startsAt));
+        appointmentRepository.saveAndFlush(newAppointment(patient, cardiology, doctorA, room1, startsAt));
+        Appointment second =
+                appointmentRepository.saveAndFlush(newAppointment(patient, cardiology, doctorB, room2, startsAt));
 
         assertThat(second.getId()).isNotNull();
     }
 
-    private static Appointment newAppointment(Specialty specialty, Doctor doctor, Room room, Instant startsAt) {
+    private static Appointment newAppointment(
+            Patient patient, Specialty specialty, Doctor doctor, Room room, Instant startsAt) {
         Appointment appointment = new Appointment();
-        appointment.setPatient(new PatientInfo("Jane Doe", "jane@example.com", "912345678"));
+        appointment.setPatient(patient);
         appointment.setSpecialty(specialty);
         appointment.setDoctor(doctor);
         appointment.setRoom(room);

@@ -35,7 +35,7 @@ com.uphill.appointments
 │   └── notification/       outbound: email confirmation
 ├── control/            BookingService, allocation/retry logic, booking exceptions,
 │                       post-booking event + after-commit fan-out
-├── entity/             domain objects (Specialty, Doctor, Room, PatientInfo, Appointment)
+├── entity/             domain objects (Specialty, Doctor, Room, Patient, Appointment)
 │   └── repository/       Spring Data JPA repositories
 └── config/             cross-cutting infra config (OpenAPI docs) — outside the BCE triad,
                          not tied to a specific actor
@@ -89,17 +89,19 @@ Once running:
 curl -X POST http://localhost:8080/api/appointments \
   -H "Content-Type: application/json" \
   -d '{
-    "patientName": "Maria Silva",
-    "patientEmail": "maria.silva@example.com",
-    "patientPhone": "+351912345678",
+    "patientId": "PAT-0001",
     "specialtyCode": "CARDIOLOGY",
     "startsAt": "2026-08-20T09:30:00Z"
   }'
 ```
 
-`startsAt` must be in the future and fall on a 30-minute boundary. Seeded
-specialty codes: `CARDIOLOGY`, `DERMATOLOGY`, `GENERAL_PRACTICE`, `PEDIATRICS`
-(see `V3__seed_specialties_doctors_rooms.sql`).
+The patient must already exist — `patientId` is a business identifier, not
+the database row id, and an unknown one returns 404. Patients are seeded
+directly for now (see `V5__seed_patients.sql`, `PAT-0001`..`PAT-0005`); a
+proper mock-data generator is a separate future task, not a booking-time
+create-on-the-fly. `startsAt` must be in the future and fall on a 30-minute
+boundary. Seeded specialty codes: `CARDIOLOGY`, `DERMATOLOGY`,
+`GENERAL_PRACTICE`, `PEDIATRICS` (see `V3__seed_specialties_doctors_rooms.sql`).
 
 ```bash
 curl "http://localhost:8080/api/appointments?specialty=CARDIOLOGY&page=0&size=20"
@@ -144,3 +146,7 @@ Postgres, WireMock, and an SMTP endpoint reachable — point `spring.datasource.
 - **Fixed 30-minute slot grid** — the no-overbooking constraint relies on it.
   Variable-duration appointments would need a range-based exclusion
   constraint instead. See DECISIONS.md #005.
+- **No patient-provisioning API** — patients are hand-seeded via Flyway for
+  now; booking requires a `patientId` to already exist. A real mock-data
+  seeding script (and/or a patient-registration endpoint) is a separate
+  future task. See DECISIONS.md #016.

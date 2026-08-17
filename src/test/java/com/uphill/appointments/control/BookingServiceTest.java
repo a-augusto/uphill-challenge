@@ -19,11 +19,12 @@ import org.springframework.dao.DataIntegrityViolationException;
 
 import com.uphill.appointments.entity.Appointment;
 import com.uphill.appointments.entity.Doctor;
-import com.uphill.appointments.entity.PatientInfo;
+import com.uphill.appointments.entity.Patient;
 import com.uphill.appointments.entity.Room;
 import com.uphill.appointments.entity.Specialty;
 import com.uphill.appointments.entity.repository.AppointmentRepository;
 import com.uphill.appointments.entity.repository.DoctorRepository;
+import com.uphill.appointments.entity.repository.PatientRepository;
 import com.uphill.appointments.entity.repository.RoomRepository;
 import com.uphill.appointments.entity.repository.SpecialtyRepository;
 
@@ -37,6 +38,8 @@ class BookingServiceTest {
     @Mock
     private RoomRepository roomRepository;
     @Mock
+    private PatientRepository patientRepository;
+    @Mock
     private AppointmentRepository appointmentRepository;
     @Mock
     private BookingAttemptExecutor bookingAttemptExecutor;
@@ -48,13 +51,14 @@ class BookingServiceTest {
     private Doctor drB;
     private Room room1;
     private Room room2;
-    private PatientInfo patient;
+    private Patient patient;
     private Instant startsAt;
 
     @BeforeEach
     void setUp() {
         bookingService = new BookingService(
-                specialtyRepository, doctorRepository, roomRepository, appointmentRepository, bookingAttemptExecutor);
+                specialtyRepository, doctorRepository, roomRepository, patientRepository,
+                appointmentRepository, bookingAttemptExecutor);
 
         cardiology = new Specialty();
         cardiology.setId(1L);
@@ -78,13 +82,19 @@ class BookingServiceTest {
         room2.setId(21L);
         room2.setActive(true);
 
-        patient = new PatientInfo("Jane Doe", "jane@example.com", "912345678");
+        patient = new Patient();
+        patient.setId(1L);
+        patient.setPatientId("PAT-0001");
+        patient.setName("Jane Doe");
+        patient.setEmail("jane@example.com");
+
         startsAt = Instant.now().plus(Duration.ofDays(1)).truncatedTo(java.time.temporal.ChronoUnit.HOURS);
     }
 
     @Test
     void booksWithFirstAvailableDoctorAndRoomWhenNoContention() {
         when(specialtyRepository.findByCode("CARDIOLOGY")).thenReturn(Optional.of(cardiology));
+        when(patientRepository.findByPatientId("PAT-0001")).thenReturn(Optional.of(patient));
         when(doctorRepository.findBySpecialtyAndActiveTrue(cardiology)).thenReturn(List.of(drA));
         when(roomRepository.findByActiveTrue()).thenReturn(List.of(room1));
         when(appointmentRepository.findBookedDoctorIdsAtSlot(any(), any())).thenReturn(List.of());
@@ -97,7 +107,7 @@ class BookingServiceTest {
                     return appointment;
                 });
 
-        Appointment result = bookingService.book("CARDIOLOGY", patient, startsAt);
+        Appointment result = bookingService.book("CARDIOLOGY", "PAT-0001", startsAt);
 
         assertThat(result.getDoctor()).isEqualTo(drA);
         assertThat(result.getRoom()).isEqualTo(room1);
@@ -106,6 +116,7 @@ class BookingServiceTest {
     @Test
     void retriesNextPairWhenFirstAttemptLosesRaceOnUniqueConstraint() {
         when(specialtyRepository.findByCode("CARDIOLOGY")).thenReturn(Optional.of(cardiology));
+        when(patientRepository.findByPatientId("PAT-0001")).thenReturn(Optional.of(patient));
         when(doctorRepository.findBySpecialtyAndActiveTrue(cardiology)).thenReturn(List.of(drA, drB));
         when(roomRepository.findByActiveTrue()).thenReturn(List.of(room1, room2));
         when(appointmentRepository.findBookedDoctorIdsAtSlot(any(), any())).thenReturn(List.of());
@@ -119,7 +130,7 @@ class BookingServiceTest {
                     return appointment;
                 });
 
-        Appointment result = bookingService.book("CARDIOLOGY", patient, startsAt);
+        Appointment result = bookingService.book("CARDIOLOGY", "PAT-0001", startsAt);
 
         assertThat(result).isNotNull();
     }
@@ -127,6 +138,7 @@ class BookingServiceTest {
     @Test
     void throwsAllocationExceptionWhenAllCandidatePairsExhausted() {
         when(specialtyRepository.findByCode("CARDIOLOGY")).thenReturn(Optional.of(cardiology));
+        when(patientRepository.findByPatientId("PAT-0001")).thenReturn(Optional.of(patient));
         when(doctorRepository.findBySpecialtyAndActiveTrue(cardiology)).thenReturn(List.of(drA));
         when(roomRepository.findByActiveTrue()).thenReturn(List.of(room1));
         when(appointmentRepository.findBookedDoctorIdsAtSlot(any(), any())).thenReturn(List.of());
@@ -134,7 +146,7 @@ class BookingServiceTest {
         when(bookingAttemptExecutor.attemptBook(any(), any(), any(), any(), any(), any()))
                 .thenThrow(new DataIntegrityViolationException("unique violation"));
 
-        assertThatThrownBy(() -> bookingService.book("CARDIOLOGY", patient, startsAt))
+        assertThatThrownBy(() -> bookingService.book("CARDIOLOGY", "PAT-0001", startsAt))
                 .isInstanceOf(AppointmentAllocationException.class);
     }
 
@@ -142,15 +154,25 @@ class BookingServiceTest {
     void throwsSlotValidationExceptionWhenSpecialtyUnknown() {
         when(specialtyRepository.findByCode("UNKNOWN")).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> bookingService.book("UNKNOWN", patient, startsAt))
+        assertThatThrownBy(() -> bookingService.book("UNKNOWN", "PAT-0001", startsAt))
                 .isInstanceOf(SlotValidationException.class);
     }
 
     @Test
     void throwsSlotValidationExceptionWhenSlotInThePast() {
         when(specialtyRepository.findByCode("CARDIOLOGY")).thenReturn(Optional.of(cardiology));
+        when(patientRepository.findByPatientId("PAT-0001")).thenReturn(Optional.of(patient));
 
-        assertThatThrownBy(() -> bookingService.book("CARDIOLOGY", patient, Instant.now().minusSeconds(3600)))
+        assertThatThrownBy(() -> bookingService.book("CARDIOLOGY", "PAT-0001", Instant.now().minusSeconds(3600)))
                 .isInstanceOf(SlotValidationException.class);
+    }
+
+    @Test
+    void throwsPatientNotFoundExceptionWhenPatientIdUnknown() {
+        when(specialtyRepository.findByCode("CARDIOLOGY")).thenReturn(Optional.of(cardiology));
+        when(patientRepository.findByPatientId("UNKNOWN")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> bookingService.book("CARDIOLOGY", "UNKNOWN", startsAt))
+                .isInstanceOf(PatientNotFoundException.class);
     }
 }

@@ -13,11 +13,12 @@ import org.springframework.stereotype.Service;
 
 import com.uphill.appointments.entity.Appointment;
 import com.uphill.appointments.entity.Doctor;
-import com.uphill.appointments.entity.PatientInfo;
+import com.uphill.appointments.entity.Patient;
 import com.uphill.appointments.entity.Room;
 import com.uphill.appointments.entity.Specialty;
 import com.uphill.appointments.entity.repository.AppointmentRepository;
 import com.uphill.appointments.entity.repository.DoctorRepository;
+import com.uphill.appointments.entity.repository.PatientRepository;
 import com.uphill.appointments.entity.repository.RoomRepository;
 import com.uphill.appointments.entity.repository.SpecialtyRepository;
 
@@ -39,12 +40,15 @@ public class BookingService {
     private final SpecialtyRepository specialtyRepository;
     private final DoctorRepository doctorRepository;
     private final RoomRepository roomRepository;
+    private final PatientRepository patientRepository;
     private final AppointmentRepository appointmentRepository;
     private final BookingAttemptExecutor bookingAttemptExecutor;
 
-    public Appointment book(String specialtyCode, PatientInfo patient, Instant startsAt) {
+    public Appointment book(String specialtyCode, String patientId, Instant startsAt) {
         Specialty specialty = specialtyRepository.findByCode(specialtyCode)
                 .orElseThrow(() -> new SlotValidationException("Unknown specialty code: " + specialtyCode));
+        Patient patient = patientRepository.findByPatientId(patientId)
+                .orElseThrow(() -> new PatientNotFoundException("Unknown patientId: " + patientId));
         validateSlot(startsAt);
         Instant endsAt = startsAt.plus(SLOT_DURATION);
 
@@ -60,7 +64,7 @@ public class BookingService {
 
     private Appointment tryBookAny(
             List<Doctor> doctors, List<Room> rooms, Specialty specialty,
-            PatientInfo patient, Instant startsAt, Instant endsAt) {
+            Patient patient, Instant startsAt, Instant endsAt) {
         int attempts = 0;
         for (Doctor doctor : doctors) {
             for (Room room : rooms) {

@@ -17,10 +17,9 @@ import org.springframework.context.ApplicationEventPublisher;
 
 import com.uphill.appointments.entity.Appointment;
 import com.uphill.appointments.entity.Doctor;
-import com.uphill.appointments.entity.PatientInfo;
+import com.uphill.appointments.entity.Patient;
 import com.uphill.appointments.entity.Room;
 import com.uphill.appointments.entity.Specialty;
-import com.uphill.appointments.control.AppointmentBookedEvent;
 import com.uphill.appointments.entity.repository.AppointmentRepository;
 
 @ExtendWith(MockitoExtension.class)
@@ -45,7 +44,11 @@ class BookingAttemptExecutorTest {
         doctor.setId(1L);
         Room room = new Room();
         room.setId(1L);
-        PatientInfo patient = new PatientInfo("Jane Doe", "jane@example.com", null);
+        Patient patient = new Patient();
+        patient.setId(1L);
+        patient.setPatientId("PAT-0001");
+        patient.setName("Jane Doe");
+        patient.setEmail("jane@example.com");
         Instant startsAt = Instant.now().plus(Duration.ofDays(1));
         Instant endsAt = startsAt.plus(Duration.ofMinutes(30));
 

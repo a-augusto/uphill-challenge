@@ -104,6 +104,12 @@ as a JUnit 5 extension in `EmailNotificationServiceIT`. Only `spring.mail.host`
 /`spring.mail.port` change between this and a real SES/SendGrid SMTP relay.
 
 ### 009 — Patient modeled as an embedded value object, not a standalone entity
+**Superseded by #016.** The spec never asked for patient identity, but the
+team wanted it anyway once we started talking through the data model — see
+#016 for the promoted design. Leaving this entry in place rather than
+deleting it: the reasoning below was sound *given the spec alone*, and the
+review trail should show the actual decision path, not just the endpoint.
+
 The spec never asks the system to recognize a returning patient, look up their
 appointment history, or manage patient identity — every request supplies
 patient info fresh. Introducing a `Patient` table with matching/dedup logic
@@ -218,3 +224,48 @@ bound to the `integration-test`/`verify` goals, and an explicit Surefire
 exclude for `**/*IT.java` so the phase split is self-documenting. `./mvnw
 verify` is now the one command that genuinely runs the full 19-test suite;
 `./mvnw test` intentionally runs only the fast subset.
+
+### 016 — Patient promoted to a real entity, looked up by a business id
+Supersedes #009. Once we started talking through the data model, patient
+identity turned out to matter: real history, no re-entering demographics on
+every visit, and a lookup key that isn't the database's internal surrogate id
+(so it survives a DB migration/rebuild and isn't guessable/enumerable the way
+a sequential `BIGINT` would be). `Patient` is now a full entity —
+`patientId` (business identifier, unique, separate from the DB `id`), name,
+email, phone, gender, date of birth, address, emergency contact phone, and a
+list of languages spoken.
+
+**Patients are provisioned out of band, not created by booking.** A future
+mock-data seeding script (explicitly not built in this pass) will be the real
+way patients get into the system; for now a handful are hand-seeded via
+Flyway (`V5__seed_patients.sql`), mirroring how doctors/rooms are seeded.
+`POST /api/appointments` now takes a `patientId` and *requires* it to already
+resolve — an unknown `patientId` is a 404 (`PatientNotFoundException`), not a
+patient created on the fly. This is a real behavior change from the
+"anyone can book with any details" version: booking someone in now means
+they must already exist in the system, which matches how a real clinic
+actually works (patients register once, then book many times) far better
+than the original embedded-info-per-booking design did.
+
+Field-shape calls, each a small independent tradeoff:
+- **Gender as a fixed enum** (`MALE`/`FEMALE`/`OTHER`/`UNSPECIFIED`), not
+  free text — easier to query/report on, at the cost of being less flexible
+  than a patient-supplied string. Went this way since the values needed to
+  live in a real column either way; a closed set is more useful downstream
+  (e.g. reporting) than an uncontrolled string would be.
+- **Address as a single free-text field**, not a structured
+  street/city/postal-code/country embeddable — the spec never asked for
+  address at all, so the fuller structure would be effort spent on a field
+  nobody's validated the shape of yet. Easy to split later if a real
+  requirement shows up.
+- **Languages spoken as a list**, via `@ElementCollection` into a
+  `patient_language` table — not a single delimited string. Normalized and
+  query-friendly without inventing a full `Language` lookup entity, which
+  would be over-engineering for "a person speaks a few languages."
+- **FK column naming**: `appointment.patient_id` (references `patient.id`,
+  the surrogate key) follows the same convention already used for
+  `doctor_id`/`room_id`/`specialty_id` — "the id of the patient" — even
+  though `patient.patient_id` is a *different* column (the business key).
+  Same pattern real schemas use all the time (e.g. a `user_id` FK column
+  pointing at a `users` table that also has its own internal identity
+  scheme); not renamed for artificial disambiguation.

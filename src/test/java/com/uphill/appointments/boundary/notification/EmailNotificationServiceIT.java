@@ -16,7 +16,7 @@ import com.icegreen.greenmail.util.GreenMailUtil;
 import com.icegreen.greenmail.util.ServerSetupTest;
 import com.uphill.appointments.entity.Appointment;
 import com.uphill.appointments.entity.Doctor;
-import com.uphill.appointments.entity.PatientInfo;
+import com.uphill.appointments.entity.Patient;
 import com.uphill.appointments.entity.Room;
 import com.uphill.appointments.entity.Specialty;
 
@@ -62,7 +62,12 @@ class EmailNotificationServiceIT {
 
         Appointment appointment = new Appointment();
         appointment.setId(UUID.randomUUID());
-        appointment.setPatient(new PatientInfo("Jane Doe", "jane@example.com", "912345678"));
+        Patient patient = new Patient();
+        patient.setId(1L);
+        patient.setPatientId("PAT-0001");
+        patient.setName("Jane Doe");
+        patient.setEmail("jane@example.com");
+        appointment.setPatient(patient);
         appointment.setSpecialty(specialty);
         appointment.setDoctor(doctor);
         appointment.setRoom(room);

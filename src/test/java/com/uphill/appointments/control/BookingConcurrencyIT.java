@@ -50,12 +50,10 @@ class BookingConcurrencyIT {
 
         List<Callable<HttpStatusCode>> tasks = new ArrayList<>();
         for (int i = 0; i < CONCURRENT_REQUESTS; i++) {
-            int index = i;
             tasks.add(() -> {
                 ready.countDown();
                 start.await();
-                CreateAppointmentRequest request = new CreateAppointmentRequest(
-                        "Patient " + index, "patient" + index + "@example.com", null, "CARDIOLOGY", startsAt);
+                CreateAppointmentRequest request = new CreateAppointmentRequest("PAT-0001", "CARDIOLOGY", startsAt);
                 return restTemplate.postForEntity("/api/appointments", request, String.class).getStatusCode();
             });
         }

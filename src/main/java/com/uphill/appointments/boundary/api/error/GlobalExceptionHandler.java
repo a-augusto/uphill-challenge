@@ -11,6 +11,7 @@ import org.springframework.web.context.request.WebRequest;
 
 import com.uphill.appointments.boundary.api.dto.ErrorResponse;
 import com.uphill.appointments.control.AppointmentAllocationException;
+import com.uphill.appointments.control.PatientNotFoundException;
 import com.uphill.appointments.control.SlotValidationException;
 
 import lombok.extern.slf4j.Slf4j;
@@ -35,6 +36,11 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(AppointmentAllocationException.class)
     public ResponseEntity<ErrorResponse> handleAllocation(AppointmentAllocationException ex, WebRequest request) {
         return build(HttpStatus.CONFLICT, ex.getMessage(), request);
+    }
+
+    @ExceptionHandler(PatientNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handlePatientNotFound(PatientNotFoundException ex, WebRequest request) {
+        return build(HttpStatus.NOT_FOUND, ex.getMessage(), request);
     }
 
     @ExceptionHandler(Exception.class)

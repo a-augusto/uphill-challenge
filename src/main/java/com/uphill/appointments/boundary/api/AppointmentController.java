@@ -20,7 +20,6 @@ import com.uphill.appointments.boundary.api.dto.AppointmentResponse;
 import com.uphill.appointments.boundary.api.dto.CreateAppointmentRequest;
 import com.uphill.appointments.control.BookingService;
 import com.uphill.appointments.entity.Appointment;
-import com.uphill.appointments.entity.PatientInfo;
 import com.uphill.appointments.entity.repository.AppointmentRepository;
 import com.uphill.appointments.entity.repository.AppointmentSpecifications;
 
@@ -38,8 +37,7 @@ public class AppointmentController {
     @Operation(summary = "Book an appointment, auto-assigning an available doctor and room")
     @PostMapping("/api/appointments")
     public ResponseEntity<AppointmentResponse> create(@Valid @RequestBody CreateAppointmentRequest request) {
-        PatientInfo patient = new PatientInfo(request.patientName(), request.patientEmail(), request.patientPhone());
-        Appointment appointment = bookingService.book(request.specialtyCode(), patient, request.startsAt());
+        Appointment appointment = bookingService.book(request.specialtyCode(), request.patientId(), request.startsAt());
         return ResponseEntity.status(HttpStatus.CREATED).body(AppointmentResponse.from(appointment));
     }
 

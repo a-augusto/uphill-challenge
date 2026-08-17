@@ -4,7 +4,6 @@ import java.time.Instant;
 import java.util.UUID;
 
 import jakarta.persistence.Column;
-import jakarta.persistence.Embedded;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
@@ -28,8 +27,9 @@ public class Appointment {
     @Id
     private UUID id;
 
-    @Embedded
-    private PatientInfo patient;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "patient_id", nullable = false)
+    private Patient patient;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "specialty_id", nullable = false)

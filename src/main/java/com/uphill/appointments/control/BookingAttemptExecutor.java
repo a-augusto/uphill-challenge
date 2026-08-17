@@ -9,10 +9,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.uphill.appointments.entity.Appointment;
 import com.uphill.appointments.entity.Doctor;
-import com.uphill.appointments.entity.PatientInfo;
+import com.uphill.appointments.entity.Patient;
 import com.uphill.appointments.entity.Room;
 import com.uphill.appointments.entity.Specialty;
-import com.uphill.appointments.control.AppointmentBookedEvent;
 import com.uphill.appointments.entity.repository.AppointmentRepository;
 
 import lombok.RequiredArgsConstructor;
@@ -47,7 +46,7 @@ class BookingAttemptExecutor {
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     Appointment attemptBook(
-            Doctor doctor, Room room, Specialty specialty, PatientInfo patient, Instant startsAt, Instant endsAt) {
+            Doctor doctor, Room room, Specialty specialty, Patient patient, Instant startsAt, Instant endsAt) {
         Appointment appointment = new Appointment();
         appointment.setPatient(patient);
         appointment.setSpecialty(specialty);

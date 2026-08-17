@@ -30,10 +30,11 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.uphill.appointments.boundary.api.dto.CreateAppointmentRequest;
 import com.uphill.appointments.control.AppointmentAllocationException;
 import com.uphill.appointments.control.BookingService;
+import com.uphill.appointments.control.PatientNotFoundException;
 import com.uphill.appointments.control.SlotValidationException;
 import com.uphill.appointments.entity.Appointment;
 import com.uphill.appointments.entity.Doctor;
-import com.uphill.appointments.entity.PatientInfo;
+import com.uphill.appointments.entity.Patient;
 import com.uphill.appointments.entity.Room;
 import com.uphill.appointments.entity.Specialty;
 import com.uphill.appointments.entity.repository.AppointmentRepository;
@@ -52,33 +53,34 @@ class AppointmentControllerTest {
     @Test
     void createReturns201WithBookedAppointmentDetails() throws Exception {
         Appointment appointment = sampleAppointment();
-        when(bookingService.book(anyString(), any(PatientInfo.class), any(Instant.class))).thenReturn(appointment);
+        when(bookingService.book(anyString(), anyString(), any(Instant.class))).thenReturn(appointment);
 
         mockMvc.perform(post("/api/appointments")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(sampleRequest())))
                 .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.patientId").value("PAT-0001"))
                 .andExpect(jsonPath("$.doctorName").value("Dr. Ana Ferreira"))
                 .andExpect(jsonPath("$.roomName").value("Room 1"))
                 .andExpect(jsonPath("$.status").value("BOOKED"));
     }
 
     @Test
-    void createReturns400WhenPatientNameMissing() throws Exception {
+    void createReturns400WhenPatientIdMissing() throws Exception {
         String invalidBody = """
-                {"patientEmail":"jane@example.com","specialtyCode":"CARDIOLOGY","startsAt":"%s"}
+                {"specialtyCode":"CARDIOLOGY","startsAt":"%s"}
                 """.formatted(futureSlot());
 
         mockMvc.perform(post("/api/appointments")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(invalidBody))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.message").value(containsString("patientName")));
+                .andExpect(jsonPath("$.message").value(containsString("patientId")));
     }
 
     @Test
     void createReturns409WhenNoDoctorOrRoomAvailable() throws Exception {
-        when(bookingService.book(anyString(), any(PatientInfo.class), any(Instant.class)))
+        when(bookingService.book(anyString(), anyString(), any(Instant.class)))
                 .thenThrow(new AppointmentAllocationException("No available doctor/room"));
 
         mockMvc.perform(post("/api/appointments")
@@ -89,13 +91,24 @@ class AppointmentControllerTest {
 
     @Test
     void createReturns400WhenSpecialtyUnknown() throws Exception {
-        when(bookingService.book(anyString(), any(PatientInfo.class), any(Instant.class)))
+        when(bookingService.book(anyString(), anyString(), any(Instant.class)))
                 .thenThrow(new SlotValidationException("Unknown specialty code: NOPE"));
 
         mockMvc.perform(post("/api/appointments")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(sampleRequest())))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void createReturns404WhenPatientIdUnknown() throws Exception {
+        when(bookingService.book(anyString(), anyString(), any(Instant.class)))
+                .thenThrow(new PatientNotFoundException("Unknown patientId: NOPE"));
+
+        mockMvc.perform(post("/api/appointments")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(sampleRequest())))
+                .andExpect(status().isNotFound());
     }
 
     @Test
@@ -109,7 +122,7 @@ class AppointmentControllerTest {
     }
 
     private static CreateAppointmentRequest sampleRequest() {
-        return new CreateAppointmentRequest("Jane Doe", "jane@example.com", "912345678", "CARDIOLOGY", futureSlot());
+        return new CreateAppointmentRequest("PAT-0001", "CARDIOLOGY", futureSlot());
     }
 
     private static Appointment sampleAppointment() {
@@ -123,9 +136,14 @@ class AppointmentControllerTest {
         room.setId(1L);
         room.setName("Room 1");
         room.setActive(true);
+        Patient patient = new Patient();
+        patient.setId(1L);
+        patient.setPatientId("PAT-0001");
+        patient.setName("Jane Doe");
+        patient.setEmail("jane@example.com");
 
         Appointment appointment = new Appointment();
-        appointment.setPatient(new PatientInfo("Jane Doe", "jane@example.com", "912345678"));
+        appointment.setPatient(patient);
         appointment.setSpecialty(specialty);
         appointment.setDoctor(doctor);
         appointment.setRoom(room);

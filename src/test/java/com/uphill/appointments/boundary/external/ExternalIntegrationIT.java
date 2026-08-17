@@ -80,6 +80,6 @@ class ExternalIntegrationIT {
 
     private static CreateAppointmentRequest sampleRequest() {
         Instant startsAt = Instant.now().plus(Duration.ofDays(3)).truncatedTo(ChronoUnit.HOURS);
-        return new CreateAppointmentRequest("Jane Doe", "jane@example.com", "912345678", "DERMATOLOGY", startsAt);
+        return new CreateAppointmentRequest("PAT-0001", "DERMATOLOGY", startsAt);
     }
 }

@@ -173,3 +173,48 @@ surfaced under real concurrent load against real Postgres, not in any mocked
 test — this build leaned on `BookingConcurrencyIT` running against Docker
 twice: once to prove the retry logic, once more to catch what fixing the
 retry logic broke.
+
+### 014 — Repackaged around Boundary-Control-Entity (BCE), not a correctness fix
+Restructured the whole codebase from a conventional layered split
+(`api`/`booking`/`domain`/`repository`/`integration`/`notification`/`events`)
+into `boundary`/`control`/`entity`. This is a personal-preference call, not a
+technical correction — BCE is the pattern I have the most hands-on experience
+with, so it's the one I can navigate and extend fastest, and the one I can
+defend most precisely in review. Mapping used:
+- **Boundary** — anything touching an actor outside the system: `boundary/api`
+  (inbound HTTP: controller, DTOs, error handling), `boundary/external`
+  (outbound: doctor-calendar/room-reservation ports + RestClient adapters),
+  `boundary/notification` (outbound: email).
+- **Control** — `BookingService`, `BookingAttemptExecutor`, the booking
+  exceptions, `AppointmentBookedEvent` and `PostBookingEventListener` — the
+  use-case logic that mediates between Boundary and Entity and never does I/O
+  of its own (it calls Boundary interfaces for that).
+- **Entity** — `entity/` (domain objects) and `entity/repository` (JPA
+  repositories).
+- `config/OpenApiConfig` deliberately stayed outside the triad: it's
+  API-documentation plumbing, not tied to a specific business actor, so
+  forcing it into `boundary` would blur what that package means. Purists
+  might disagree; flagging the call explicitly rather than let it look like
+  an oversight.
+
+Pure mechanical move — `git mv` + scripted package/import rewrite, then a
+full recompile and test run to confirm zero behavioral change (same 19
+tests, same results, before and after).
+
+### 015 — Added Failsafe for `*IT.java`, since Surefire was silently skipping them
+Found while re-verifying the BCE move: Maven Surefire's default include
+patterns (`**/*Test.java`, `**/*Tests.java`, `**/*TestCase.java`) don't match
+`*IT.java` at all — that suffix is Failsafe's convention, and this project
+never had Failsafe configured. Plain `./mvnw test` had been silently running
+only 15 of the 19 tests the whole time; `BookingConcurrencyIT` and
+`ExternalIntegrationIT` were never actually executing unless explicitly named
+with `-Dtest=`. I'd been trusting an earlier `mvn test` run that happened to
+use an explicit `-Dtest` filter (which bypasses the default include/exclude
+patterns entirely) and mistook that for the real default behavior — worth
+owning here rather than glossing over, since it means an earlier "all 19
+tests pass" claim in this log wasn't actually verified the way I said it was.
+Fixed properly rather than papered over: added the `maven-failsafe-plugin`
+bound to the `integration-test`/`verify` goals, and an explicit Surefire
+exclude for `**/*IT.java` so the phase split is self-documenting. `./mvnw
+verify` is now the one command that genuinely runs the full 19-test suite;
+`./mvnw test` intentionally runs only the fast subset.

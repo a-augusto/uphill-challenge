@@ -1,11 +1,13 @@
 services:
   grafana-lgtm:
+    container_name: 'observability'
     image: 'grafana/otel-lgtm:latest'
     ports:
       - '3000:3000'
       - '4317'
       - '4318'
   postgres:
+    container_name: 'appointments-database'
     image: 'postgres:latest'
     environment:
       - 'POSTGRES_DB=mydatabase'
@@ -14,6 +16,7 @@ services:
     ports:
       - '5432'
   wiremock:
+    container_name: 'external-services'
     image: 'wiremock/wiremock:latest'
     command: ['--global-response-templating', '--verbose']
     volumes:
@@ -21,6 +24,7 @@ services:
     ports:
       - '8081:8080'
   greenmail:
+    container_name: 'email-server'
     image: 'greenmail/standalone:latest'
     environment:
       - 'GREENMAIL_OPTS=-Dgreenmail.setup.test.smtp -Dgreenmail.hostname=0.0.0.0 -Dgreenmail.verbose'

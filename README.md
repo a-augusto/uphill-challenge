@@ -25,26 +25,38 @@ reserving the room in (stubbed) external systems.
 
 ## Architecture at a glance
 
+Package structure follows **Boundary-Control-Entity (BCE)**:
+
 ```
 com.uphill.appointments
-├── domain/         entities: Specialty, Doctor, Room, PatientInfo, Appointment
-├── repository/      Spring Data JPA repositories
-├── booking/          BookingService — doctor/room allocation + retry logic
-├── api/               REST controller, request/response DTOs, error handling
-├── integration/        ports to external systems + RestClient adapters
-├── notification/        email confirmation
-└── events/               after-commit fan-out to integration + notification
+├── boundary/
+│   ├── api/            inbound HTTP: REST controller, DTOs, error handling
+│   ├── external/         outbound: ports + RestClient adapters to doctor-calendar/room-reservation
+│   └── notification/       outbound: email confirmation
+├── control/            BookingService, allocation/retry logic, booking exceptions,
+│                       post-booking event + after-commit fan-out
+├── entity/             domain objects (Specialty, Doctor, Room, PatientInfo, Appointment)
+│   └── repository/       Spring Data JPA repositories
+└── config/             cross-cutting infra config (OpenAPI docs) — outside the BCE triad,
+                         not tied to a specific actor
 ```
 
-**Booking flow:** `POST /api/appointments` → `BookingService` resolves the
-specialty, fetches doctors/rooms with that specialty free at that slot, and
-tries to persist an appointment for a candidate doctor+room pair. No-overbooking
-is enforced by a database unique constraint on `(doctor_id, starts_at)` and
-`(room_id, starts_at)` — if a concurrent request wins the race for a pair, the
-insert fails and the service just tries the next pair. Once a booking commits,
-an `AppointmentBookedEvent` fires the doctor-calendar update, room reservation,
-and confirmation email — each independently, each best-effort, none of them
-able to fail the booking response.
+- **Boundary** — anything touching an actor outside the system: inbound HTTP
+  and outbound integrations (external systems, email).
+- **Control** — use-case orchestration and business rules; mediates between
+  Boundary and Entity, never does I/O directly.
+- **Entity** — domain model + persistence.
+
+**Booking flow:** `POST /api/appointments` → `BookingService` (control)
+resolves the specialty, fetches doctors/rooms with that specialty free at
+that slot, and tries to persist an appointment for a candidate doctor+room
+pair. No-overbooking is enforced by a database unique constraint on
+`(doctor_id, starts_at)` and `(room_id, starts_at)` — if a concurrent request
+wins the race for a pair, the insert fails and the service just tries the
+next pair. Once a booking commits, an `AppointmentBookedEvent` fires the
+doctor-calendar update, room reservation, and confirmation email (all
+boundary classes) — each independently, each best-effort, none of them able
+to fail the booking response.
 
 See [`DECISIONS.md`](./DECISIONS.md) for the reasoning behind every
 non-obvious call (why a unique constraint instead of row locking, why
@@ -96,17 +108,20 @@ curl "http://localhost:8080/api/appointments?specialty=CARDIOLOGY&page=0&size=20
 ## Running the tests
 
 ```bash
-./mvnw test
+./mvnw verify
 ```
 
-Most tests are plain unit/slice tests and need nothing extra. A few are
-integration tests that spin up real infrastructure via Testcontainers
-(`AppointmentRepositoryTest`, `BookingConcurrencyIT`, `ExternalIntegrationIT`)
-— **these require Docker running locally.** `BookingConcurrencyIT` is the one
-worth reading first: it fires concurrent booking requests at the same
-specialty/slot and asserts exactly as many succeed as there is doctor
-capacity, which is the actual proof the no-overbooking guarantee holds under
-real contention rather than just in a single-threaded unit test.
+Unit and slice tests (`*Test.java`) run via Surefire in the `test` phase;
+integration tests (`*IT.java`) run via Failsafe in the `verify` phase — so
+`./mvnw verify` is the single command that runs everything. `./mvnw test`
+alone runs the faster subset, skipping `BookingConcurrencyIT` and
+`ExternalIntegrationIT` (still requires Docker for `AppointmentRepositoryTest`,
+which uses Testcontainers Postgres despite the `Test` suffix).
+`BookingConcurrencyIT` is the one worth reading first: it fires concurrent
+booking requests at the same specialty/slot and asserts exactly as many
+succeed as there is doctor capacity, which is the actual proof the
+no-overbooking guarantee holds under real contention rather than just in a
+single-threaded unit test.
 
 ## Building the container
 

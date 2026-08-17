@@ -386,3 +386,17 @@ exist under real concurrency, a real (or deliberately absent) broker, or
 real Spring context startup. Exactly the reason this build leans on
 Testcontainers/WireMock/real infra instead of fakes wherever the interaction
 under test is the point.
+
+### 019 — Instant replaced with OffsetDateTime everywhere
+User's call: `OffsetDateTime` throughout instead of `Instant`, for every
+timestamp field/param/DTO in the codebase (`startsAt`/`endsAt`/`createdAt` on
+`Appointment`, the booking API's request/response DTOs, the Kafka event
+payload, the external client ports). Mechanical, no behavior change — DB
+columns were already `TIMESTAMPTZ`, which Hibernate maps to `OffsetDateTime`
+natively, and JSON (de)serialization is unaffected (Jackson's `JavaTimeModule`
+handles both the same way, ISO-8601 with offset). Two real call-site fixes
+needed along the way, since `OffsetDateTime`'s API isn't a drop-in superset
+of `Instant`'s: `Instant.getEpochSecond()` → `OffsetDateTime.toEpochSecond()`
+(`BookingService`'s slot-boundary check), and `Instant.atZone(ZoneId)` →
+`OffsetDateTime.atZoneSameInstant(ZoneId)` (the confirmation email's
+Lisbon-local date formatting).

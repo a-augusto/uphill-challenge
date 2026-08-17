@@ -1,6 +1,6 @@
 package com.uphill.appointments.boundary.api;
 
-import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.util.Arrays;
 import java.util.Objects;
 import java.util.stream.Stream;
@@ -45,8 +45,8 @@ public class AppointmentController {
     @GetMapping("/api/appointments")
     public Page<AppointmentResponse> list(
             @RequestParam(required = false) String specialty,
-            @RequestParam(required = false) Instant from,
-            @RequestParam(required = false) Instant to,
+            @RequestParam(required = false) OffsetDateTime from,
+            @RequestParam(required = false) OffsetDateTime to,
             Pageable pageable) {
         Specification<Appointment> spec = Specification.allOf(Stream.of(
                         AppointmentSpecifications.hasSpecialtyCode(specialty),

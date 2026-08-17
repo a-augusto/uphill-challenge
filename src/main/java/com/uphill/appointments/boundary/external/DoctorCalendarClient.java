@@ -1,6 +1,6 @@
 package com.uphill.appointments.boundary.external;
 
-import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.util.UUID;
 
 /**
@@ -10,5 +10,5 @@ import java.util.UUID;
  */
 public interface DoctorCalendarClient {
 
-    void reserveSlot(Long doctorId, Instant startsAt, Instant endsAt, UUID appointmentId);
+    void reserveSlot(Long doctorId, OffsetDateTime startsAt, OffsetDateTime endsAt, UUID appointmentId);
 }

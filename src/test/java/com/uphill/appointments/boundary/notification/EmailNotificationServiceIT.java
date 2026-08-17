@@ -3,7 +3,7 @@ package com.uphill.appointments.boundary.notification;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.time.Duration;
-import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 
@@ -71,7 +71,7 @@ class EmailNotificationServiceIT {
         appointment.setSpecialty(specialty);
         appointment.setDoctor(doctor);
         appointment.setRoom(room);
-        Instant startsAt = Instant.now().plus(Duration.ofDays(1)).truncatedTo(ChronoUnit.HOURS);
+        OffsetDateTime startsAt = OffsetDateTime.now().plus(Duration.ofDays(1)).truncatedTo(ChronoUnit.HOURS);
         appointment.setStartsAt(startsAt);
         appointment.setEndsAt(startsAt.plus(Duration.ofMinutes(30)));
         return appointment;

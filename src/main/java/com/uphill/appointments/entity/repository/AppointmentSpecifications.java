@@ -1,6 +1,6 @@
 package com.uphill.appointments.entity.repository;
 
-import java.time.Instant;
+import java.time.OffsetDateTime;
 
 import org.springframework.data.jpa.domain.Specification;
 
@@ -24,14 +24,14 @@ public final class AppointmentSpecifications {
         return (root, query, cb) -> cb.equal(root.get("specialty").get("code"), specialtyCode);
     }
 
-    public static Specification<Appointment> startsAtFrom(Instant from) {
+    public static Specification<Appointment> startsAtFrom(OffsetDateTime from) {
         if (from == null) {
             return null;
         }
         return (root, query, cb) -> cb.greaterThanOrEqualTo(root.get("startsAt"), from);
     }
 
-    public static Specification<Appointment> startsAtTo(Instant to) {
+    public static Specification<Appointment> startsAtTo(OffsetDateTime to) {
         if (to == null) {
             return null;
         }

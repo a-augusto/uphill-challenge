@@ -1,6 +1,6 @@
 package com.uphill.appointments.boundary.api.dto;
 
-import java.time.Instant;
+import java.time.OffsetDateTime;
 
 import jakarta.validation.constraints.Future;
 import jakarta.validation.constraints.NotBlank;
@@ -16,5 +16,5 @@ public record CreateAppointmentRequest(
 
         @NotNull(message = "startsAt is required")
         @Future(message = "startsAt must be in the future")
-        Instant startsAt) {
+        OffsetDateTime startsAt) {
 }

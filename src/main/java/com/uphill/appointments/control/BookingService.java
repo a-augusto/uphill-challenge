@@ -1,7 +1,7 @@
 package com.uphill.appointments.control;
 
 import java.time.Duration;
-import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
@@ -46,13 +46,13 @@ public class BookingService {
     private final AppointmentRepository appointmentRepository;
     private final BookingAttemptExecutor bookingAttemptExecutor;
 
-    public Appointment book(String specialtyCode, String patientId, Instant startsAt) {
+    public Appointment book(String specialtyCode, String patientId, OffsetDateTime startsAt) {
         Specialty specialty = specialtyRepository.findByCode(specialtyCode)
                 .orElseThrow(() -> new SlotValidationException("Unknown specialty code: " + specialtyCode));
         Patient patient = patientRepository.findByPatientId(patientId)
                 .orElseThrow(() -> new PatientNotFoundException("Unknown patientId: " + patientId));
         validateSlot(startsAt);
-        Instant endsAt = startsAt.plus(SLOT_DURATION);
+        OffsetDateTime endsAt = startsAt.plus(SLOT_DURATION);
 
         List<Doctor> availableDoctors = availableDoctors(specialty, startsAt);
         List<Room> availableRooms = availableRooms(startsAt);
@@ -66,7 +66,7 @@ public class BookingService {
 
     private Appointment tryBookAny(
             List<Doctor> doctors, List<Room> rooms, Specialty specialty,
-            Patient patient, Instant startsAt, Instant endsAt) {
+            Patient patient, OffsetDateTime startsAt, OffsetDateTime endsAt) {
         int attempts = 0;
         for (Doctor doctor : doctors) {
             for (Room room : rooms) {
@@ -92,7 +92,7 @@ public class BookingService {
                 "No available doctor/room for specialty " + specialty.getCode() + " at " + startsAt);
     }
 
-    private List<Doctor> availableDoctors(Specialty specialty, Instant startsAt) {
+    private List<Doctor> availableDoctors(Specialty specialty, OffsetDateTime startsAt) {
         List<Doctor> doctors = doctorRepository.findBySpecialtyAndActiveTrue(specialty);
         List<Long> doctorIds = doctors.stream().map(Doctor::getId).toList();
         Set<Long> booked = doctorIds.isEmpty()
@@ -103,7 +103,7 @@ public class BookingService {
         return available;
     }
 
-    private List<Room> availableRooms(Instant startsAt) {
+    private List<Room> availableRooms(OffsetDateTime startsAt) {
         List<Room> rooms = roomRepository.findByActiveTrue();
         List<Long> roomIds = rooms.stream().map(Room::getId).toList();
         Set<Long> booked = roomIds.isEmpty()
@@ -114,11 +114,11 @@ public class BookingService {
         return available;
     }
 
-    private void validateSlot(Instant startsAt) {
-        if (!startsAt.isAfter(Instant.now())) {
+    private void validateSlot(OffsetDateTime startsAt) {
+        if (!startsAt.isAfter(OffsetDateTime.now())) {
             throw new SlotValidationException("startsAt must be in the future");
         }
-        if (startsAt.getEpochSecond() % SLOT_DURATION.getSeconds() != 0) {
+        if (startsAt.toEpochSecond() % SLOT_DURATION.getSeconds() != 0) {
             throw new SlotValidationException(
                     "startsAt must align to a " + SLOT_DURATION.toMinutes() + "-minute slot boundary");
         }

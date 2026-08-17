@@ -9,7 +9,7 @@ import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.wireMoc
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.time.Duration;
-import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
@@ -134,7 +134,7 @@ class ExternalIntegrationIT {
     }
 
     private CreateAppointmentRequest sampleRequest() {
-        Instant startsAt = Instant.now().plus(Duration.ofDays(3)).truncatedTo(ChronoUnit.HOURS);
+        OffsetDateTime startsAt = OffsetDateTime.now().plus(Duration.ofDays(3)).truncatedTo(ChronoUnit.HOURS);
         return new CreateAppointmentRequest(patient.getPatientId(), specialty.getCode(), startsAt);
     }
 }

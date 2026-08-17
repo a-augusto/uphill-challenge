@@ -10,7 +10,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.time.Duration;
-import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 
@@ -53,7 +53,7 @@ class AppointmentControllerTest {
     @Test
     void createReturns201WithBookedAppointmentDetails() throws Exception {
         Appointment appointment = sampleAppointment();
-        when(bookingService.book(anyString(), anyString(), any(Instant.class))).thenReturn(appointment);
+        when(bookingService.book(anyString(), anyString(), any(OffsetDateTime.class))).thenReturn(appointment);
 
         mockMvc.perform(post("/api/appointments")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -80,7 +80,7 @@ class AppointmentControllerTest {
 
     @Test
     void createReturns409WhenNoDoctorOrRoomAvailable() throws Exception {
-        when(bookingService.book(anyString(), anyString(), any(Instant.class)))
+        when(bookingService.book(anyString(), anyString(), any(OffsetDateTime.class)))
                 .thenThrow(new AppointmentAllocationException("No available doctor/room"));
 
         mockMvc.perform(post("/api/appointments")
@@ -91,7 +91,7 @@ class AppointmentControllerTest {
 
     @Test
     void createReturns400WhenSpecialtyUnknown() throws Exception {
-        when(bookingService.book(anyString(), anyString(), any(Instant.class)))
+        when(bookingService.book(anyString(), anyString(), any(OffsetDateTime.class)))
                 .thenThrow(new SlotValidationException("Unknown specialty code: NOPE"));
 
         mockMvc.perform(post("/api/appointments")
@@ -102,7 +102,7 @@ class AppointmentControllerTest {
 
     @Test
     void createReturns404WhenPatientIdUnknown() throws Exception {
-        when(bookingService.book(anyString(), anyString(), any(Instant.class)))
+        when(bookingService.book(anyString(), anyString(), any(OffsetDateTime.class)))
                 .thenThrow(new PatientNotFoundException("Unknown patientId: NOPE"));
 
         mockMvc.perform(post("/api/appointments")
@@ -147,15 +147,15 @@ class AppointmentControllerTest {
         appointment.setSpecialty(specialty);
         appointment.setDoctor(doctor);
         appointment.setRoom(room);
-        Instant startsAt = futureSlot();
+        OffsetDateTime startsAt = futureSlot();
         appointment.setStartsAt(startsAt);
         appointment.setEndsAt(startsAt.plus(Duration.ofMinutes(30)));
         appointment.setId(java.util.UUID.randomUUID());
-        appointment.setCreatedAt(Instant.now());
+        appointment.setCreatedAt(OffsetDateTime.now());
         return appointment;
     }
 
-    private static Instant futureSlot() {
-        return Instant.now().plus(Duration.ofDays(1)).truncatedTo(ChronoUnit.HOURS);
+    private static OffsetDateTime futureSlot() {
+        return OffsetDateTime.now().plus(Duration.ofDays(1)).truncatedTo(ChronoUnit.HOURS);
     }
 }

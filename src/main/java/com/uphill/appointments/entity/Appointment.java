@@ -1,6 +1,6 @@
 package com.uphill.appointments.entity;
 
-import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.util.UUID;
 
 import jakarta.persistence.Column;
@@ -44,16 +44,16 @@ public class Appointment {
     private Room room;
 
     @Column(name = "starts_at")
-    private Instant startsAt;
+    private OffsetDateTime startsAt;
 
     @Column(name = "ends_at")
-    private Instant endsAt;
+    private OffsetDateTime endsAt;
 
     @Enumerated(EnumType.STRING)
     private AppointmentStatus status = AppointmentStatus.BOOKED;
 
     @Column(name = "created_at")
-    private Instant createdAt;
+    private OffsetDateTime createdAt;
 
     @PrePersist
     void onCreate() {
@@ -61,7 +61,7 @@ public class Appointment {
             id = UUID.randomUUID();
         }
         if (createdAt == null) {
-            createdAt = Instant.now();
+            createdAt = OffsetDateTime.now();
         }
         if (status == null) {
             status = AppointmentStatus.BOOKED;

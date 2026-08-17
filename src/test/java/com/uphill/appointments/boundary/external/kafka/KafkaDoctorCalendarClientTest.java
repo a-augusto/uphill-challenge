@@ -6,7 +6,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.time.Duration;
-import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
@@ -26,8 +26,8 @@ class KafkaDoctorCalendarClientTest {
         KafkaDoctorCalendarClient client = new KafkaDoctorCalendarClient(kafkaTemplate, "doctor-calendar-updates");
 
         UUID appointmentId = UUID.randomUUID();
-        Instant startsAt = Instant.now().plus(Duration.ofDays(1));
-        Instant endsAt = startsAt.plus(Duration.ofMinutes(30));
+        OffsetDateTime startsAt = OffsetDateTime.now().plus(Duration.ofDays(1));
+        OffsetDateTime endsAt = startsAt.plus(Duration.ofMinutes(30));
 
         client.reserveSlot(1L, startsAt, endsAt, appointmentId);
 

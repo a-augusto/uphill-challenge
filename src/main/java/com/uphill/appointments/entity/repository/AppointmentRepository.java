@@ -1,6 +1,6 @@
 package com.uphill.appointments.entity.repository;
 
-import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
 
@@ -16,10 +16,10 @@ public interface AppointmentRepository extends JpaRepository<Appointment, UUID>,
     @Query("""
             select a.doctor.id from Appointment a where a.startsAt = :startsAt and a.doctor.id in :doctorIds
             """)
-    List<Long> findBookedDoctorIdsAtSlot(@Param("startsAt") Instant startsAt, @Param("doctorIds") List<Long> doctorIds);
+    List<Long> findBookedDoctorIdsAtSlot(@Param("startsAt") OffsetDateTime startsAt, @Param("doctorIds") List<Long> doctorIds);
 
     @Query("""
             select a.room.id from Appointment a where a.startsAt = :startsAt and a.room.id in :roomIds
             """)
-    List<Long> findBookedRoomIdsAtSlot(@Param("startsAt") Instant startsAt, @Param("roomIds") List<Long> roomIds);
+    List<Long> findBookedRoomIdsAtSlot(@Param("startsAt") OffsetDateTime startsAt, @Param("roomIds") List<Long> roomIds);
 }

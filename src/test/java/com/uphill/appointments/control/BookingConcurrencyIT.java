@@ -3,7 +3,7 @@ package com.uphill.appointments.control;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.time.Duration;
-import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
@@ -78,7 +78,7 @@ class BookingConcurrencyIT {
         }
         Patient patient = fixtures.createPatient();
 
-        Instant startsAt = Instant.now().plus(Duration.ofDays(2)).truncatedTo(ChronoUnit.HOURS);
+        OffsetDateTime startsAt = OffsetDateTime.now().plus(Duration.ofDays(2)).truncatedTo(ChronoUnit.HOURS);
         ExecutorService executor = Executors.newFixedThreadPool(CONCURRENT_REQUESTS);
         CountDownLatch ready = new CountDownLatch(CONCURRENT_REQUESTS);
         CountDownLatch start = new CountDownLatch(1);

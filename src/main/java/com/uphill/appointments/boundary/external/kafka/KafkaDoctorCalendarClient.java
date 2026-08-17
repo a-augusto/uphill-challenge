@@ -1,6 +1,6 @@
 package com.uphill.appointments.boundary.external.kafka;
 
-import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.util.UUID;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -33,7 +33,7 @@ public class KafkaDoctorCalendarClient implements DoctorCalendarClient {
     }
 
     @Override
-    public void reserveSlot(Long doctorId, Instant startsAt, Instant endsAt, UUID appointmentId) {
+    public void reserveSlot(Long doctorId, OffsetDateTime startsAt, OffsetDateTime endsAt, UUID appointmentId) {
         DoctorCalendarUpdateEvent event = new DoctorCalendarUpdateEvent(appointmentId, doctorId, startsAt, endsAt);
         kafkaTemplate.send(topic, appointmentId.toString(), event)
                 .whenComplete((result, ex) -> {

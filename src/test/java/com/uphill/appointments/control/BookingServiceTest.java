@@ -6,7 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
 import java.time.Duration;
-import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -52,7 +52,7 @@ class BookingServiceTest {
     private Room room1;
     private Room room2;
     private Patient patient;
-    private Instant startsAt;
+    private OffsetDateTime startsAt;
 
     @BeforeEach
     void setUp() {
@@ -88,7 +88,7 @@ class BookingServiceTest {
         patient.setName("Jane Doe");
         patient.setEmail("jane@example.com");
 
-        startsAt = Instant.now().plus(Duration.ofDays(1)).truncatedTo(java.time.temporal.ChronoUnit.HOURS);
+        startsAt = OffsetDateTime.now().plus(Duration.ofDays(1)).truncatedTo(java.time.temporal.ChronoUnit.HOURS);
     }
 
     @Test
@@ -200,7 +200,7 @@ class BookingServiceTest {
         when(specialtyRepository.findByCode("CARDIOLOGY")).thenReturn(Optional.of(cardiology));
         when(patientRepository.findByPatientId("PAT-0001")).thenReturn(Optional.of(patient));
 
-        assertThatThrownBy(() -> bookingService.book("CARDIOLOGY", "PAT-0001", Instant.now().minusSeconds(3600)))
+        assertThatThrownBy(() -> bookingService.book("CARDIOLOGY", "PAT-0001", OffsetDateTime.now().minusSeconds(3600)))
                 .isInstanceOf(SlotValidationException.class);
     }
 

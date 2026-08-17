@@ -10,7 +10,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.time.Duration;
-import java.time.Instant;
+import java.time.OffsetDateTime;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -44,8 +44,8 @@ class BookingAttemptExecutorTest {
     private Doctor doctor;
     private Room room;
     private Patient patient;
-    private Instant startsAt;
-    private Instant endsAt;
+    private OffsetDateTime startsAt;
+    private OffsetDateTime endsAt;
 
     @BeforeEach
     void setUp() {
@@ -61,7 +61,7 @@ class BookingAttemptExecutorTest {
         patient.setPatientId("PAT-0001");
         patient.setName("Jane Doe");
         patient.setEmail("jane@example.com");
-        startsAt = Instant.now().plus(Duration.ofDays(1));
+        startsAt = OffsetDateTime.now().plus(Duration.ofDays(1));
         endsAt = startsAt.plus(Duration.ofMinutes(30));
     }
 

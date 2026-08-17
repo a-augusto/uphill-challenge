@@ -4,7 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.Duration;
-import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.time.temporal.ChronoUnit;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -59,7 +59,7 @@ class AppointmentRepositoryTest {
         Doctor doctor = fixtures.createDoctor(specialty);
         Room room1 = fixtures.createRoom();
         Room room2 = fixtures.createRoom();
-        Instant startsAt = futureSlot();
+        OffsetDateTime startsAt = futureSlot();
 
         appointmentRepository.saveAndFlush(newAppointment(patient, specialty, doctor, room1, startsAt));
 
@@ -75,7 +75,7 @@ class AppointmentRepositoryTest {
         Doctor doctorA = fixtures.createDoctor(specialty);
         Doctor doctorB = fixtures.createDoctor(specialty);
         Room room = fixtures.createRoom();
-        Instant startsAt = futureSlot();
+        OffsetDateTime startsAt = futureSlot();
 
         appointmentRepository.saveAndFlush(newAppointment(patient, specialty, doctorA, room, startsAt));
 
@@ -92,7 +92,7 @@ class AppointmentRepositoryTest {
         Doctor doctorB = fixtures.createDoctor(specialty);
         Room room1 = fixtures.createRoom();
         Room room2 = fixtures.createRoom();
-        Instant startsAt = futureSlot();
+        OffsetDateTime startsAt = futureSlot();
 
         appointmentRepository.saveAndFlush(newAppointment(patient, specialty, doctorA, room1, startsAt));
         Appointment second =
@@ -102,7 +102,7 @@ class AppointmentRepositoryTest {
     }
 
     private static Appointment newAppointment(
-            Patient patient, Specialty specialty, Doctor doctor, Room room, Instant startsAt) {
+            Patient patient, Specialty specialty, Doctor doctor, Room room, OffsetDateTime startsAt) {
         Appointment appointment = new Appointment();
         appointment.setPatient(patient);
         appointment.setSpecialty(specialty);
@@ -113,7 +113,7 @@ class AppointmentRepositoryTest {
         return appointment;
     }
 
-    private static Instant futureSlot() {
-        return Instant.now().plus(Duration.ofDays(1)).truncatedTo(ChronoUnit.HOURS);
+    private static OffsetDateTime futureSlot() {
+        return OffsetDateTime.now().plus(Duration.ofDays(1)).truncatedTo(ChronoUnit.HOURS);
     }
 }

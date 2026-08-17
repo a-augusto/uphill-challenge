@@ -1,6 +1,6 @@
 package com.uphill.appointments.control;
 
-import java.time.Instant;
+import java.time.OffsetDateTime;
 
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Component;
@@ -57,7 +57,7 @@ class BookingAttemptExecutor {
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     Appointment attemptBook(
-            Doctor doctor, Room room, Specialty specialty, Patient patient, Instant startsAt, Instant endsAt) {
+            Doctor doctor, Room room, Specialty specialty, Patient patient, OffsetDateTime startsAt, OffsetDateTime endsAt) {
         Appointment appointment = new Appointment();
         appointment.setPatient(patient);
         appointment.setSpecialty(specialty);

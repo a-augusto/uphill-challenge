@@ -1,6 +1,6 @@
 package com.uphill.appointments.boundary.external;
 
-import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.util.UUID;
 
 /**
@@ -9,5 +9,5 @@ import java.util.UUID;
  */
 public interface RoomReservationClient {
 
-    void reserveRoom(Long roomId, Instant startsAt, Instant endsAt, UUID appointmentId);
+    void reserveRoom(Long roomId, OffsetDateTime startsAt, OffsetDateTime endsAt, UUID appointmentId);
 }

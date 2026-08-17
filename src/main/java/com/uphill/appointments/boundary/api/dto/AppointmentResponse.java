@@ -1,6 +1,6 @@
 package com.uphill.appointments.boundary.api.dto;
 
-import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.util.UUID;
 
 import com.uphill.appointments.entity.Appointment;
@@ -12,8 +12,8 @@ public record AppointmentResponse(
         String specialty,
         String doctorName,
         String roomName,
-        Instant startsAt,
-        Instant endsAt,
+        OffsetDateTime startsAt,
+        OffsetDateTime endsAt,
         String status) {
 
     public static AppointmentResponse from(Appointment appointment) {

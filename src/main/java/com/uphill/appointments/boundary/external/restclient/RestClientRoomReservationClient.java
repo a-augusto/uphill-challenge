@@ -1,6 +1,6 @@
 package com.uphill.appointments.boundary.external.restclient;
 
-import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.util.UUID;
 
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -19,7 +19,7 @@ public class RestClientRoomReservationClient implements RoomReservationClient {
     }
 
     @Override
-    public void reserveRoom(Long roomId, Instant startsAt, Instant endsAt, UUID appointmentId) {
+    public void reserveRoom(Long roomId, OffsetDateTime startsAt, OffsetDateTime endsAt, UUID appointmentId) {
         restClient.post()
                 .uri("/rooms/{roomId}/reservations", roomId)
                 .body(new ReserveRoomRequest(appointmentId, startsAt, endsAt))
@@ -27,6 +27,6 @@ public class RestClientRoomReservationClient implements RoomReservationClient {
                 .toBodilessEntity();
     }
 
-    private record ReserveRoomRequest(UUID appointmentId, Instant startsAt, Instant endsAt) {
+    private record ReserveRoomRequest(UUID appointmentId, OffsetDateTime startsAt, OffsetDateTime endsAt) {
     }
 }

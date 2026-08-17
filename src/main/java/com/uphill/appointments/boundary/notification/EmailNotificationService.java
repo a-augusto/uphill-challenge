@@ -50,7 +50,8 @@ public class EmailNotificationService implements NotificationService {
                 See you soon!
                 """.formatted(
                 appointment.getPatient().getName(),
-                DATE_TIME_FORMATTER.format(appointment.getStartsAt().atZone(java.time.ZoneId.of("Europe/Lisbon"))),
+                DATE_TIME_FORMATTER.format(
+                        appointment.getStartsAt().atZoneSameInstant(java.time.ZoneId.of("Europe/Lisbon"))),
                 appointment.getDoctor().getName(),
                 appointment.getRoom().getName()));
 

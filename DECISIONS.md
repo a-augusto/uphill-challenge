@@ -319,3 +319,70 @@ depend on randomly generated data, which is exactly the kind of flakiness
 risk not worth taking. Each test creates uniquely-named specialties/doctors/
 rooms/patients (counter-suffixed) so nothing collides with any other test or
 run.
+
+### 018 — Room reservation is now synchronous and gates booking; doctor-calendar sync moved to Kafka
+Came out of reviewing the data model together: both external notifications
+used to work the same way (fire-and-forget, after commit, best-effort). That
+was wrong for room reservation specifically — a room must actually be
+secured for the appointment to be valid, so its answer should gate the
+booking exactly like our own DB unique constraint does. Doctor-calendar sync
+has no such correctness requirement, so it moved the other direction: off
+REST entirely, onto a real Kafka event, since nothing in our own correctness
+depends on it and a message broker is the more honest shape for a
+notification nobody needs to wait on.
+
+**Room reservation**: the call moved from `PostBookingEventListener`
+(after-commit, best-effort) into `BookingAttemptExecutor.attemptBook()`
+itself — still inside the same `REQUIRES_NEW` transaction as the DB insert.
+DB check first (cheap, local), then the external call; if it throws, a new
+`RoomReservationFailedException` rolls back the transaction and
+`BookingService`'s existing retry loop just tries the next candidate pair,
+exactly like a lost race on the unique constraint. This deliberately
+reintroduces the "network I/O inside a DB transaction" pattern #007
+specifically avoided for calendar/email — the right call here, since room
+correctness is load-bearing in a way calendar sync never was.
+
+**Doctor calendar**: `KafkaDoctorCalendarClient` replaces
+`RestClientDoctorCalendarClient` behind the same `DoctorCalendarClient` port
+— `PostBookingEventListener`'s calendar call didn't need to change at all,
+only the adapter did, which is exactly what the port/adapter split from #006
+was for. Publishes a `DoctorCalendarUpdateEvent` to a
+`doctor-calendar-updates` topic via `KafkaTemplate`; still called from the
+existing after-commit best-effort fan-out. "Mock events" here means a real
+Testcontainers-backed Kafka broker in tests and a real single-node broker in
+`docker-compose.yaml` for local dev — not a fake — matching how every other
+external dependency in this build is tested (DECISIONS #006's reasoning
+applies again: exercise the real integration code path, don't bypass it).
+
+**Three real bugs found wiring this up, each worth its own line**, because
+each one only showed up under conditions the unit tests don't create:
+- *JDK HttpClient's HTTP/2 vs WireMock, under concurrency.* Once room
+  reservation gated booking, `BookingConcurrencyIT`'s 10 concurrent requests
+  started intermittently losing bookings to `EOFException`/`RST_STREAM`
+  errors — a known flaky interaction between the JDK `HttpClient`'s HTTP/2
+  connection reuse and WireMock under load. Invisible before, because a
+  flaky post-commit notification was silently swallowed; load-bearing now,
+  it directly cost successful bookings. Fixed by pinning the room-reservation
+  `RestClient` to HTTP/1.1 (`ExternalClientsConfig`).
+- *Kafka producer default timeouts are enormous for a fire-and-forget call.*
+  Default `max.block.ms` is 60s — since the calendar call still happens
+  synchronously within the after-commit listener (same request thread, after
+  commit but before the response returns), an unreachable broker was holding
+  every response hostage for up to a minute. Capped at 2s
+  (`spring.kafka.producer.properties.max.block.ms`) — long enough for a
+  healthy broker, short enough that "broker's down" fails fast and gets
+  logged like any other best-effort failure.
+- *Eager topic creation traded one slow path for another.* Declaring the
+  topic via a `NewTopic` bean (so a real broker doesn't need auto-creation
+  racing against that same 2s producer timeout) means `KafkaAdmin` also
+  tries to reach the broker at startup — and its own default timeouts are
+  just as generous (~30s), so *every* test booting the full app context
+  without a real broker configured started paying a ~40s startup tax, not
+  just Kafka-specific ones. Capped `spring.kafka.admin.properties.*`
+  timeouts at 3s too, for the same fail-fast reason as the producer.
+
+None of these three were reachable from a mocked unit test — all three only
+exist under real concurrency, a real (or deliberately absent) broker, or
+real Spring context startup. Exactly the reason this build leans on
+Testcontainers/WireMock/real infra instead of fakes wherever the interaction
+under test is the point.

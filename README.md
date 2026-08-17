@@ -18,9 +18,10 @@ reserving the room in (stubbed) external systems.
 | Migrations | Flyway |
 | API docs | springdoc-openapi (Swagger UI) |
 | Observability | OpenTelemetry |
-| External systems | WireMock (doctor calendar, room reservation) |
+| Room reservation | WireMock stub, synchronous — gates booking |
+| Doctor-calendar sync | Apache Kafka — fire-and-forget event |
 | Email | Spring Mail + GreenMail (fake SMTP) |
-| Testing | JUnit 5, Mockito, Testcontainers (Postgres), WireMock, GreenMail |
+| Testing | JUnit 5, Mockito, Testcontainers (Postgres, Kafka), WireMock, GreenMail |
 | Boilerplate | Lombok |
 
 ## Architecture at a glance
@@ -31,10 +32,10 @@ Package structure follows **Boundary-Control-Entity (BCE)**:
 com.uphill.appointments
 ├── boundary/
 │   ├── api/            inbound HTTP: REST controller, DTOs, error handling
-│   ├── external/         outbound: ports + RestClient adapters to doctor-calendar/room-reservation
+│   ├── external/         outbound: room-reservation (RestClient) + doctor-calendar (Kafka) ports
 │   └── notification/       outbound: email confirmation
-├── control/            BookingService, allocation/retry logic, booking exceptions,
-│                       post-booking event + after-commit fan-out
+├── control/            BookingService, allocation/retry logic (incl. room-reservation
+│                       gating), booking exceptions, post-booking event + after-commit fan-out
 ├── entity/             domain objects (Specialty, Doctor, Room, Patient, Appointment)
 │   └── repository/       Spring Data JPA repositories
 └── config/             cross-cutting infra config (OpenAPI docs) — outside the BCE triad,
@@ -53,10 +54,15 @@ that slot, and tries to persist an appointment for a candidate doctor+room
 pair. No-overbooking is enforced by a database unique constraint on
 `(doctor_id, starts_at)` and `(room_id, starts_at)` — if a concurrent request
 wins the race for a pair, the insert fails and the service just tries the
-next pair. Once a booking commits, an `AppointmentBookedEvent` fires the
-doctor-calendar update, room reservation, and confirmation email (all
-boundary classes) — each independently, each best-effort, none of them able
-to fail the booking response.
+next pair. **Room reservation is part of that same attempt**: a room must
+actually be secured for the appointment to be valid, so
+`BookingAttemptExecutor` calls the room-reservation system synchronously,
+inside the same transaction as the DB insert — a rejection rolls the attempt
+back and `BookingService` tries the next candidate pair, exactly like a lost
+DB race. Once a booking commits, an `AppointmentBookedEvent` fires the
+doctor-calendar update (published to Kafka, fire-and-forget — nothing in our
+own correctness depends on it) and the confirmation email, both
+best-effort, neither able to fail the already-successful booking response.
 
 See [`DECISIONS.md`](./DECISIONS.md) for the reasoning behind every
 non-obvious call (why a unique constraint instead of row locking, why
@@ -75,7 +81,8 @@ on boot (see `docker-compose.yaml`):
 | Service | Purpose | Port |
 |---|---|---|
 | `postgres` | application database | random (auto-wired) |
-| `wiremock` | stub doctor-calendar + room-reservation APIs | 8081 |
+| `wiremock` | stub room-reservation API | 8081 |
+| `kafka` | doctor-calendar event broker | 9092 |
 | `greenmail` | fake SMTP server for confirmation emails | 3025 (SMTP), 8082 (web UI) |
 | `grafana-lgtm` | OpenTelemetry collector + dashboards | 3000 |
 
@@ -149,17 +156,20 @@ docker build -t uphill-appointments .
 ```
 
 Multi-stage build on `eclipse-temurin:25-*`. The running container still needs
-Postgres, WireMock, and an SMTP endpoint reachable — point `spring.datasource.*`,
-`app.integrations.*.base-url`, and `spring.mail.*` at your target environment.
+Postgres, the room-reservation system, a Kafka broker, and an SMTP endpoint
+reachable — point `spring.datasource.*`, `app.integrations.room-reservation.base-url`,
+`spring.kafka.bootstrap-servers`, and `spring.mail.*` at your target environment.
 
 ## Known gaps / what's next
 
 - **No auth** on the admin listing endpoint — out of scope per the spec, but
   the first thing to add before any real traffic. See DECISIONS.md #010.
-- **No durable retry** if the doctor-calendar or room-reservation call fails
-  after a booking commits — logged, not retried. A transactional outbox would
-  close this gap; deliberately not built for a one-week scope. See
-  DECISIONS.md #007.
+- **No durable retry** if the doctor-calendar Kafka publish fails — logged,
+  not retried; the confirmation email has the same gap. A transactional
+  outbox would close this; deliberately not built for a one-week scope. See
+  DECISIONS.md #007. (Room reservation is different: it gates the booking
+  attempt itself now, so a failure there doesn't need durable retry — the
+  candidate pair just doesn't become a booking. See DECISIONS.md #018.)
 - **Fixed 30-minute slot grid** — the no-overbooking constraint relies on it.
   Variable-duration appointments would need a range-based exclusion
   constraint instead. See DECISIONS.md #005.

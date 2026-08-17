@@ -1,7 +1,11 @@
 package com.uphill.appointments.control;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -14,7 +18,9 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.web.client.RestClientException;
 
+import com.uphill.appointments.boundary.external.RoomReservationClient;
 import com.uphill.appointments.entity.Appointment;
 import com.uphill.appointments.entity.Doctor;
 import com.uphill.appointments.entity.Patient;
@@ -28,35 +34,57 @@ class BookingAttemptExecutorTest {
     @Mock
     private AppointmentRepository appointmentRepository;
     @Mock
+    private RoomReservationClient roomReservationClient;
+    @Mock
     private ApplicationEventPublisher eventPublisher;
 
     private BookingAttemptExecutor executor;
 
+    private Specialty specialty;
+    private Doctor doctor;
+    private Room room;
+    private Patient patient;
+    private Instant startsAt;
+    private Instant endsAt;
+
     @BeforeEach
     void setUp() {
-        executor = new BookingAttemptExecutor(appointmentRepository, eventPublisher);
-    }
+        executor = new BookingAttemptExecutor(appointmentRepository, roomReservationClient, eventPublisher);
 
-    @Test
-    void publishesBookedEventAfterPersistingTheAppointment() {
-        Specialty specialty = new Specialty(1L, "CARDIOLOGY", "Cardiology");
-        Doctor doctor = new Doctor();
+        specialty = new Specialty(1L, "CARDIOLOGY", "Cardiology");
+        doctor = new Doctor();
         doctor.setId(1L);
-        Room room = new Room();
+        room = new Room();
         room.setId(1L);
-        Patient patient = new Patient();
+        patient = new Patient();
         patient.setId(1L);
         patient.setPatientId("PAT-0001");
         patient.setName("Jane Doe");
         patient.setEmail("jane@example.com");
-        Instant startsAt = Instant.now().plus(Duration.ofDays(1));
-        Instant endsAt = startsAt.plus(Duration.ofMinutes(30));
+        startsAt = Instant.now().plus(Duration.ofDays(1));
+        endsAt = startsAt.plus(Duration.ofMinutes(30));
+    }
 
+    @Test
+    void reservesRoomAndPublishesBookedEventAfterPersistingTheAppointment() {
         when(appointmentRepository.saveAndFlush(any())).thenAnswer(inv -> inv.getArgument(0));
 
         Appointment result = executor.attemptBook(doctor, room, specialty, patient, startsAt, endsAt);
 
         assertThat(result.getDoctor()).isEqualTo(doctor);
+        verify(roomReservationClient).reserveRoom(eq(room.getId()), eq(startsAt), eq(endsAt), any());
         verify(eventPublisher).publishEvent(any(AppointmentBookedEvent.class));
+    }
+
+    @Test
+    void throwsRoomReservationFailedAndNeverPublishesEventWhenExternalRoomCallFails() {
+        when(appointmentRepository.saveAndFlush(any())).thenAnswer(inv -> inv.getArgument(0));
+        doThrow(new RestClientException("room system unavailable"))
+                .when(roomReservationClient).reserveRoom(any(), any(), any(), any());
+
+        assertThatThrownBy(() -> executor.attemptBook(doctor, room, specialty, patient, startsAt, endsAt))
+                .isInstanceOf(RoomReservationFailedException.class);
+
+        verify(eventPublisher, never()).publishEvent(any());
     }
 }

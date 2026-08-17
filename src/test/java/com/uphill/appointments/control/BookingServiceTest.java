@@ -136,6 +136,43 @@ class BookingServiceTest {
     }
 
     @Test
+    void retriesNextPairWhenRoomReservationFails() {
+        when(specialtyRepository.findByCode("CARDIOLOGY")).thenReturn(Optional.of(cardiology));
+        when(patientRepository.findByPatientId("PAT-0001")).thenReturn(Optional.of(patient));
+        when(doctorRepository.findBySpecialtyAndActiveTrue(cardiology)).thenReturn(List.of(drA, drB));
+        when(roomRepository.findByActiveTrue()).thenReturn(List.of(room1, room2));
+        when(appointmentRepository.findBookedDoctorIdsAtSlot(any(), any())).thenReturn(List.of());
+        when(appointmentRepository.findBookedRoomIdsAtSlot(any(), any())).thenReturn(List.of());
+        when(bookingAttemptExecutor.attemptBook(any(), any(), any(), any(), any(), any()))
+                .thenThrow(new RoomReservationFailedException("room rejected", new RuntimeException()))
+                .thenAnswer(inv -> {
+                    Appointment appointment = new Appointment();
+                    appointment.setDoctor(inv.getArgument(0));
+                    appointment.setRoom(inv.getArgument(1));
+                    return appointment;
+                });
+
+        Appointment result = bookingService.book("CARDIOLOGY", "PAT-0001", startsAt);
+
+        assertThat(result).isNotNull();
+    }
+
+    @Test
+    void throwsAllocationExceptionWhenRoomReservationFailsForAllCandidates() {
+        when(specialtyRepository.findByCode("CARDIOLOGY")).thenReturn(Optional.of(cardiology));
+        when(patientRepository.findByPatientId("PAT-0001")).thenReturn(Optional.of(patient));
+        when(doctorRepository.findBySpecialtyAndActiveTrue(cardiology)).thenReturn(List.of(drA));
+        when(roomRepository.findByActiveTrue()).thenReturn(List.of(room1));
+        when(appointmentRepository.findBookedDoctorIdsAtSlot(any(), any())).thenReturn(List.of());
+        when(appointmentRepository.findBookedRoomIdsAtSlot(any(), any())).thenReturn(List.of());
+        when(bookingAttemptExecutor.attemptBook(any(), any(), any(), any(), any(), any()))
+                .thenThrow(new RoomReservationFailedException("room rejected", new RuntimeException()));
+
+        assertThatThrownBy(() -> bookingService.book("CARDIOLOGY", "PAT-0001", startsAt))
+                .isInstanceOf(AppointmentAllocationException.class);
+    }
+
+    @Test
     void throwsAllocationExceptionWhenAllCandidatePairsExhausted() {
         when(specialtyRepository.findByCode("CARDIOLOGY")).thenReturn(Optional.of(cardiology));
         when(patientRepository.findByPatientId("PAT-0001")).thenReturn(Optional.of(patient));

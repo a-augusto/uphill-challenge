@@ -23,6 +23,7 @@ import com.uphill.appointments.entity.repository.RoomRepository;
 import com.uphill.appointments.entity.repository.SpecialtyRepository;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * Assigns a doctor + room for a requested specialty/timeslot and persists the
@@ -32,6 +33,7 @@ import lombok.RequiredArgsConstructor;
  */
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class BookingService {
 
     static final Duration SLOT_DURATION = Duration.ofMinutes(30);
@@ -76,7 +78,13 @@ public class BookingService {
                 try {
                     return bookingAttemptExecutor.attemptBook(doctor, room, specialty, patient, startsAt, endsAt);
                 } catch (DataIntegrityViolationException lostRace) {
-                    // Another request took this doctor or room for this slot first — try the next pair.
+                    // Another request took this doctor or room for this slot first — routine, silent.
+                } catch (RoomReservationFailedException roomFailure) {
+                    // Worth a log line (unlike a routine DB race): the external room system
+                    // rejecting/erroring is an operational signal, not expected noise.
+                    log.warn(
+                            "Room {} reservation failed for specialty {} at {}, trying next candidate",
+                            room.getId(), specialty.getCode(), startsAt, roomFailure);
                 }
             }
         }

@@ -1,8 +1,6 @@
 CREATE TABLE appointment (
     id             UUID PRIMARY KEY,
-    patient_name   VARCHAR(200) NOT NULL,
-    patient_email  VARCHAR(200) NOT NULL,
-    patient_phone  VARCHAR(50),
+    patient_id     BIGINT       NOT NULL REFERENCES patient (id),
     specialty_id   BIGINT       NOT NULL REFERENCES specialty (id),
     doctor_id      BIGINT       NOT NULL REFERENCES doctor (id),
     room_id        BIGINT       NOT NULL REFERENCES room (id),
@@ -18,5 +16,6 @@ CREATE TABLE appointment (
     CONSTRAINT uq_room_slot UNIQUE (room_id, starts_at)
 );
 
+CREATE INDEX idx_appointment_patient_id ON appointment (patient_id);
 CREATE INDEX idx_appointment_specialty_id ON appointment (specialty_id);
 CREATE INDEX idx_appointment_starts_at ON appointment (starts_at);

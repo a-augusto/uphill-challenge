@@ -269,3 +269,53 @@ Field-shape calls, each a small independent tradeoff:
   Same pattern real schemas use all the time (e.g. a `user_id` FK column
   pointing at a `users` table that also has its own internal identity
   scheme); not renamed for artificial disambiguation.
+
+### 017 — Flyway is structure-only now; seed data moved to a profile-gated runner, and migration history got squashed
+User's call, made explicit this session: Flyway migrations should be DDL
+only — tables, constraints, indexes — never rows. Up to this point
+`V3__seed_specialties_doctors_rooms.sql` and `V5__seed_patients.sql` broke
+that rule. Since this project isn't in production yet, both the principle
+and a full migration-history squash got applied in the same pass — no reason
+to carry forward migrations shaped by the *order features got built in*
+(patient table bolted on after appointment already existed, then an ALTER to
+link them) once a cleaner end-state is obvious.
+
+**Squash**: six migrations became three, all pure DDL —
+`V1__create_specialty_doctor_room_tables.sql` (unchanged),
+`V2__create_patient_table.sql` (was V4, moved earlier — patient must exist
+before appointment can reference it), `V3__create_appointment_table.sql`
+(merges the old V2 + the old V6's ALTER — `patient_id` is part of the table
+definition from day one, never bolted on). The old seed migrations were
+deleted outright, not folded in. Every `id` column also went back to
+`GENERATED ALWAYS AS IDENTITY` (from `BY DEFAULT`) — `BY DEFAULT` existed
+specifically so seed migrations could insert explicit ids; nothing does that
+anymore, so the stricter default is correct again.
+
+**Squashing pre-prod is safe, but not free**: Flyway tracks applied
+migrations by checksum in `flyway_schema_history`, so any local/dev database
+that had the old six-migration history applied needs to be reset (drop and
+recreate the Postgres container) before the new three-file history will
+apply cleanly. One-time cost, worth calling out explicitly since it's exactly
+the kind of thing that's invisible until someone's local setup breaks.
+
+**Seeding**: replaced by `seed/DevDataSeeder.java`, a
+`@Profile("seed")`-gated `CommandLineRunner` using the existing JPA
+repositories — run via `./mvnw spring-boot:run -Dspring-boot.run.profiles=seed`.
+Idempotent (skips if any specialty exists), never active without the
+profile, so default/production boot is untouched by it. Specialties stay
+hardcoded (real domain vocabulary — `CARDIOLOGY` etc. aren't "mock" data in
+any sense); doctors, rooms, and patients are generated via
+[DataFaker](https://www.datafaker.net/) for realistic bulk demo data. This
+is also the "real mock-data generator" flagged as a future task in #016 —
+now built, not just planned.
+
+**Test fixtures decoupled too**: the three Testcontainers-backed tests that
+used to lean on Flyway-seeded rows (`AppointmentRepositoryTest`,
+`BookingConcurrencyIT`, `ExternalIntegrationIT`) now provision their own
+minimal fixtures directly via a small `TestDataFactory` test helper, in
+their own setup, using the real repositories. Deliberately *not* wired to
+the `seed` profile/DataFaker output — that would make test correctness
+depend on randomly generated data, which is exactly the kind of flakiness
+risk not worth taking. Each test creates uniquely-named specialties/doctors/
+rooms/patients (counter-suffixed) so nothing collides with any other test or
+run.

@@ -7,6 +7,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
@@ -19,6 +20,7 @@ import com.uphill.appointments.entity.Doctor;
 import com.uphill.appointments.entity.Patient;
 import com.uphill.appointments.entity.Room;
 import com.uphill.appointments.entity.Specialty;
+import com.uphill.appointments.support.TestDataFactory;
 import com.uphill.appointments.support.TestcontainersConfig;
 
 /**
@@ -43,51 +45,58 @@ class AppointmentRepositoryTest {
     @Autowired
     private PatientRepository patientRepository;
 
+    private TestDataFactory fixtures;
+
+    @BeforeEach
+    void setUp() {
+        fixtures = new TestDataFactory(specialtyRepository, doctorRepository, roomRepository, patientRepository);
+    }
+
     @Test
     void rejectsSecondAppointmentForSameDoctorAtSameSlot() {
-        Specialty cardiology = specialtyRepository.findByCode("CARDIOLOGY").orElseThrow();
-        Patient patient = patientRepository.findByPatientId("PAT-0001").orElseThrow();
-        Doctor doctor = doctorRepository.findBySpecialtyAndActiveTrue(cardiology).getFirst();
-        Room room1 = roomRepository.findByActiveTrue().get(0);
-        Room room2 = roomRepository.findByActiveTrue().get(1);
+        Specialty specialty = fixtures.createSpecialty();
+        Patient patient = fixtures.createPatient();
+        Doctor doctor = fixtures.createDoctor(specialty);
+        Room room1 = fixtures.createRoom();
+        Room room2 = fixtures.createRoom();
         Instant startsAt = futureSlot();
 
-        appointmentRepository.saveAndFlush(newAppointment(patient, cardiology, doctor, room1, startsAt));
+        appointmentRepository.saveAndFlush(newAppointment(patient, specialty, doctor, room1, startsAt));
 
-        Appointment conflicting = newAppointment(patient, cardiology, doctor, room2, startsAt);
+        Appointment conflicting = newAppointment(patient, specialty, doctor, room2, startsAt);
         assertThatThrownBy(() -> appointmentRepository.saveAndFlush(conflicting))
                 .isInstanceOf(DataIntegrityViolationException.class);
     }
 
     @Test
     void rejectsSecondAppointmentForSameRoomAtSameSlot() {
-        Specialty cardiology = specialtyRepository.findByCode("CARDIOLOGY").orElseThrow();
-        Patient patient = patientRepository.findByPatientId("PAT-0001").orElseThrow();
-        Doctor doctorA = doctorRepository.findBySpecialtyAndActiveTrue(cardiology).get(0);
-        Doctor doctorB = doctorRepository.findBySpecialtyAndActiveTrue(cardiology).get(1);
-        Room room = roomRepository.findByActiveTrue().getFirst();
+        Specialty specialty = fixtures.createSpecialty();
+        Patient patient = fixtures.createPatient();
+        Doctor doctorA = fixtures.createDoctor(specialty);
+        Doctor doctorB = fixtures.createDoctor(specialty);
+        Room room = fixtures.createRoom();
         Instant startsAt = futureSlot();
 
-        appointmentRepository.saveAndFlush(newAppointment(patient, cardiology, doctorA, room, startsAt));
+        appointmentRepository.saveAndFlush(newAppointment(patient, specialty, doctorA, room, startsAt));
 
-        Appointment conflicting = newAppointment(patient, cardiology, doctorB, room, startsAt);
+        Appointment conflicting = newAppointment(patient, specialty, doctorB, room, startsAt);
         assertThatThrownBy(() -> appointmentRepository.saveAndFlush(conflicting))
                 .isInstanceOf(DataIntegrityViolationException.class);
     }
 
     @Test
     void allowsDifferentDoctorAndRoomAtSameSlot() {
-        Specialty cardiology = specialtyRepository.findByCode("CARDIOLOGY").orElseThrow();
-        Patient patient = patientRepository.findByPatientId("PAT-0001").orElseThrow();
-        Doctor doctorA = doctorRepository.findBySpecialtyAndActiveTrue(cardiology).get(0);
-        Doctor doctorB = doctorRepository.findBySpecialtyAndActiveTrue(cardiology).get(1);
-        Room room1 = roomRepository.findByActiveTrue().get(0);
-        Room room2 = roomRepository.findByActiveTrue().get(1);
+        Specialty specialty = fixtures.createSpecialty();
+        Patient patient = fixtures.createPatient();
+        Doctor doctorA = fixtures.createDoctor(specialty);
+        Doctor doctorB = fixtures.createDoctor(specialty);
+        Room room1 = fixtures.createRoom();
+        Room room2 = fixtures.createRoom();
         Instant startsAt = futureSlot();
 
-        appointmentRepository.saveAndFlush(newAppointment(patient, cardiology, doctorA, room1, startsAt));
+        appointmentRepository.saveAndFlush(newAppointment(patient, specialty, doctorA, room1, startsAt));
         Appointment second =
-                appointmentRepository.saveAndFlush(newAppointment(patient, cardiology, doctorB, room2, startsAt));
+                appointmentRepository.saveAndFlush(newAppointment(patient, specialty, doctorB, room2, startsAt));
 
         assertThat(second.getId()).isNotNull();
     }

@@ -96,16 +96,33 @@ curl -X POST http://localhost:8080/api/appointments \
 ```
 
 The patient must already exist — `patientId` is a business identifier, not
-the database row id, and an unknown one returns 404. Patients are seeded
-directly for now (see `V5__seed_patients.sql`, `PAT-0001`..`PAT-0005`); a
-proper mock-data generator is a separate future task, not a booking-time
-create-on-the-fly. `startsAt` must be in the future and fall on a 30-minute
-boundary. Seeded specialty codes: `CARDIOLOGY`, `DERMATOLOGY`,
-`GENERAL_PRACTICE`, `PEDIATRICS` (see `V3__seed_specialties_doctors_rooms.sql`).
+the database row id, and an unknown one returns 404. `startsAt` must be in
+the future and fall on a 30-minute boundary. See **Seeding data** below for
+how to get specialties/doctors/rooms/patients into a fresh database.
 
 ```bash
 curl "http://localhost:8080/api/appointments?specialty=CARDIOLOGY&page=0&size=20"
 ```
+
+## Seeding data
+
+Flyway migrations are structure only (tables, constraints, indexes) — no
+rows. A fresh database has no specialties, doctors, rooms, or patients until
+you seed it:
+
+```bash
+./mvnw spring-boot:run -Dspring-boot.run.profiles=seed
+```
+
+This activates `DevDataSeeder` (`seed/DevDataSeeder.java`), which never runs
+otherwise — default/production boot is completely unaffected. It's
+idempotent (skips entirely if any specialty already exists), and populates:
+the 4 real specialty codes (`CARDIOLOGY`, `DERMATOLOGY`, `GENERAL_PRACTICE`,
+`PEDIATRICS`), a couple of doctors per specialty, 5 rooms, and ~30 patients
+with realistic mock demographics via [DataFaker](https://www.datafaker.net/)
+(business ids `PAT-000001`, `PAT-000002`, ...). Check the app log or query
+`GET /api/appointments` after booking to find generated `patientId`s to test
+with.
 
 ## Running the tests
 
@@ -146,7 +163,7 @@ Postgres, WireMock, and an SMTP endpoint reachable — point `spring.datasource.
 - **Fixed 30-minute slot grid** — the no-overbooking constraint relies on it.
   Variable-duration appointments would need a range-based exclusion
   constraint instead. See DECISIONS.md #005.
-- **No patient-provisioning API** — patients are hand-seeded via Flyway for
-  now; booking requires a `patientId` to already exist. A real mock-data
-  seeding script (and/or a patient-registration endpoint) is a separate
-  future task. See DECISIONS.md #016.
+- **No patient-provisioning API** — patients only come from the `seed`
+  profile's `DevDataSeeder` (see **Seeding data**) or direct DB access;
+  there's no registration endpoint. Booking requires a `patientId` to
+  already exist. See DECISIONS.md #016, #017.

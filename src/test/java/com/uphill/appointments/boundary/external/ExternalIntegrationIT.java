@@ -12,6 +12,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -27,6 +28,13 @@ import org.springframework.test.context.DynamicPropertySource;
 import com.github.tomakehurst.wiremock.junit5.WireMockExtension;
 import com.uphill.appointments.boundary.api.dto.AppointmentResponse;
 import com.uphill.appointments.boundary.api.dto.CreateAppointmentRequest;
+import com.uphill.appointments.entity.Patient;
+import com.uphill.appointments.entity.Specialty;
+import com.uphill.appointments.entity.repository.DoctorRepository;
+import com.uphill.appointments.entity.repository.PatientRepository;
+import com.uphill.appointments.entity.repository.RoomRepository;
+import com.uphill.appointments.entity.repository.SpecialtyRepository;
+import com.uphill.appointments.support.TestDataFactory;
 import com.uphill.appointments.support.TestcontainersConfig;
 
 /**
@@ -53,6 +61,27 @@ class ExternalIntegrationIT {
 
     @Autowired
     private TestRestTemplate restTemplate;
+    @Autowired
+    private SpecialtyRepository specialtyRepository;
+    @Autowired
+    private DoctorRepository doctorRepository;
+    @Autowired
+    private RoomRepository roomRepository;
+    @Autowired
+    private PatientRepository patientRepository;
+
+    private Specialty specialty;
+    private Patient patient;
+
+    @BeforeEach
+    void setUp() {
+        TestDataFactory fixtures =
+                new TestDataFactory(specialtyRepository, doctorRepository, roomRepository, patientRepository);
+        specialty = fixtures.createSpecialty();
+        fixtures.createDoctor(specialty);
+        fixtures.createRoom();
+        patient = fixtures.createPatient();
+    }
 
     @Test
     void firesCalendarAndRoomReservationCallsAfterBookingCommits() {
@@ -78,8 +107,8 @@ class ExternalIntegrationIT {
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
     }
 
-    private static CreateAppointmentRequest sampleRequest() {
+    private CreateAppointmentRequest sampleRequest() {
         Instant startsAt = Instant.now().plus(Duration.ofDays(3)).truncatedTo(ChronoUnit.HOURS);
-        return new CreateAppointmentRequest("PAT-0001", "DERMATOLOGY", startsAt);
+        return new CreateAppointmentRequest(patient.getPatientId(), specialty.getCode(), startsAt);
     }
 }

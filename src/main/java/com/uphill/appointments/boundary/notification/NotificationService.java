@@ -10,4 +10,6 @@ import com.uphill.appointments.entity.Appointment;
 public interface NotificationService {
 
     void sendAppointmentConfirmation(Appointment appointment);
+
+    void sendAppointmentCancellation(Appointment appointment);
 }

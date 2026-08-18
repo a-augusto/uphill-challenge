@@ -1,0 +1,9 @@
+{
+  "request": {
+    "method": "DELETE",
+    "urlPathPattern": "/rooms/[0-9]+/reservations/.*"
+  },
+  "response": {
+    "status": 204
+  }
+}

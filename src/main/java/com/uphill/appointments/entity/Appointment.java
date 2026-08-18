@@ -55,6 +55,9 @@ public class Appointment {
     @Column(name = "created_at")
     private OffsetDateTime createdAt;
 
+    @Column(name = "cancelled_at")
+    private OffsetDateTime cancelledAt;
+
     @PrePersist
     void onCreate() {
         if (id == null) {

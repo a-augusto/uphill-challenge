@@ -11,7 +11,10 @@ import org.springframework.web.context.request.WebRequest;
 
 import com.uphill.appointments.boundary.api.dto.ErrorResponse;
 import com.uphill.appointments.control.AppointmentAllocationException;
+import com.uphill.appointments.control.AppointmentAlreadyCancelledException;
+import com.uphill.appointments.control.AppointmentNotFoundException;
 import com.uphill.appointments.control.PatientNotFoundException;
+import com.uphill.appointments.control.RoomAvailabilityCheckFailedException;
 import com.uphill.appointments.control.SlotValidationException;
 
 import lombok.extern.slf4j.Slf4j;
@@ -41,6 +44,24 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(PatientNotFoundException.class)
     public ResponseEntity<ErrorResponse> handlePatientNotFound(PatientNotFoundException ex, WebRequest request) {
         return build(HttpStatus.NOT_FOUND, ex.getMessage(), request);
+    }
+
+    @ExceptionHandler(AppointmentNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleAppointmentNotFound(AppointmentNotFoundException ex, WebRequest request) {
+        return build(HttpStatus.NOT_FOUND, ex.getMessage(), request);
+    }
+
+    @ExceptionHandler(AppointmentAlreadyCancelledException.class)
+    public ResponseEntity<ErrorResponse> handleAlreadyCancelled(
+            AppointmentAlreadyCancelledException ex, WebRequest request) {
+        return build(HttpStatus.CONFLICT, ex.getMessage(), request);
+    }
+
+    @ExceptionHandler(RoomAvailabilityCheckFailedException.class)
+    public ResponseEntity<ErrorResponse> handleRoomAvailabilityCheckFailed(
+            RoomAvailabilityCheckFailedException ex, WebRequest request) {
+        log.warn("Room availability check failed", ex);
+        return build(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), request);
     }
 
     @ExceptionHandler(Exception.class)

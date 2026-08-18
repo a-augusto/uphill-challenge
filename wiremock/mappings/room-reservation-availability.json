@@ -1,0 +1,15 @@
+{
+  "request": {
+    "method": "GET",
+    "urlPathPattern": "/rooms/available"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "roomIds": [1, 2, 3, 4, 5]
+    }
+  }
+}

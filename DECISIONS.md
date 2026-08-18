@@ -55,6 +55,10 @@ not a time range — it relies on the app enforcing a fixed 30-minute slot grid
 this would need to become a Postgres exclusion constraint over a `tstzrange`.
 Not needed for this spec, so not built.
 
+**Update (see #020):** once cancellation existed, the plain `UNIQUE`
+constraints became partial unique indexes filtered to `status = 'BOOKED'` —
+the range-vs-instant tradeoff above is unchanged and still applies.
+
 ### 006 — External systems (doctor calendar, room reservation) as real HTTP calls against WireMock, not in-process fakes
 The brief is explicit: "the code should be written as if it were a real
 system, with clear abstractions and proper integration points." An in-process
@@ -400,3 +404,102 @@ of `Instant`'s: `Instant.getEpochSecond()` → `OffsetDateTime.toEpochSecond()`
 (`BookingService`'s slot-boundary check), and `Instant.atZone(ZoneId)` →
 `OffsetDateTime.atZoneSameInstant(ZoneId)` (the confirmation email's
 Lisbon-local date formatting).
+
+### 020 — Appointment cancellation: release doesn't gate the way reserve does
+Second half of the lifecycle work #018 set up. `POST /api/appointments/{id}/cancel`
+(`CancellationService`) marks the appointment `CANCELLED`, sets `cancelledAt`,
+and — this is the load-bearing design call — publishes an
+`AppointmentCancelledEvent` for a symmetric release fan-out (room, calendar,
+email), all best-effort, none of them gating the cancellation.
+
+**Why release doesn't mirror reserve's gating behavior**, even though they're
+symmetric operations on the same external system: reserving a room is
+load-bearing for *booking* — an appointment isn't valid without one, so a
+rejection has to stop the booking. Releasing has no equivalent stake for
+*cancellation* — the patient's cancellation is already correct and complete
+the moment our own DB says so; the external system finding out is a
+courtesy, not a precondition. Making a patient's cancellation depend on a
+downstream system's uptime would be trading a real user-facing failure mode
+for a rare, silently-recoverable one. So: `CancellationService.cancel()` is a
+plain `@Transactional` method (no `BookingAttemptExecutor`-style split needed
+— nothing here is a retried candidate pair), and the release fan-out lives in
+the same after-commit best-effort listener as booking's confirm-side actions.
+
+**Listener renamed**, honestly rather than papering over scope creep:
+`PostBookingEventListener` → `AppointmentEventListener`, now handling both
+`AppointmentBookedEvent` and `AppointmentCancelledEvent` — it's the same
+after-commit fan-out mechanism serving two lifecycle events, not two
+unrelated concerns bolted together.
+
+**Schema**: `appointment` gained `cancelled_at`, and the two `UNIQUE`
+constraints from #005 became partial unique indexes
+(`WHERE status = 'BOOKED'`) — a cancelled row no longer holds its doctor/room
+slot hostage. Proven by a repository test that books, cancels, and rebooks
+the exact same doctor+room+slot successfully. Edited `V3` in place rather
+than adding a new migration — still pre-prod, same standing permission as
+the earlier squash.
+
+**Reschedule** is deliberately *not* a new endpoint: cancel, then a fresh
+`POST /api/appointments`. Two well-tested, independent operations composed
+by the client is simpler and more honest than a combined endpoint that would
+just be doing the same two things internally — no atomicity requirement was
+stated, and inventing one would be scope creep in the other direction.
+
+### 021 — External system now gates the room *candidate list*, not just the final reservation
+Until now, "which rooms are candidates" was purely our own DB's opinion
+(`Room.active` + no conflicting appointment at the slot); the external
+room-reservation system only ever got asked about one specific room, at the
+very end, via `reserveRoom`. That's not how a real hospital's room inventory
+would work — rooms are shared with other systems (maintenance holds, other
+departments booking directly against the facilities system) that our DB has
+no visibility into. So the external mock now also exposes a day-level
+availability check, and `BookingService` asks it *before* iterating
+candidates, not just when reserving one.
+
+New `control/RoomAvailabilityService.availableRoomsOn(LocalDate)` — asks
+`RoomReservationClient.findAvailableRoomIds(date)`, intersects with our own
+`Room.active` set. Deliberately **day granularity**, not per-slot or
+per-week: it's exactly what `BookingService` needs (a slot's date), and a
+week view has no consumer yet — building it speculatively would be exactly
+the kind of premature abstraction this project tries to avoid. `BookingService`
+now depends on this service instead of `RoomRepository` directly, and layers
+its own existing per-slot conflict check on top of the (now externally
+pre-filtered) candidate list.
+
+**The final `reserveRoom` call during `BookingAttemptExecutor.attemptBook`
+remains the actual gate** — this day-level check is a coarser, cheaper
+pre-filter layered in front of it, not a replacement. It can't protect
+against a same-slot race between two concurrent requests (that's still
+`reserveRoom` synchronously inside the DB transaction, per #018); what it
+protects against is booking against a room the external system already
+considers unavailable for reasons entirely outside our own appointment
+table.
+
+**Failure mode**: if the availability check itself fails (network error,
+non-2xx), `RoomAvailabilityService` throws
+`RoomAvailabilityCheckFailedException` — a *different* exception from
+`RoomReservationFailedException` (that one means "one specific reservation
+attempt was rejected"; this one means "couldn't even determine candidates").
+`BookingService` catches it and rethrows as `AppointmentAllocationException`
+(409), consistent with every other "couldn't find a valid room" outcome.
+The same exception surfaces at `GET /api/rooms/availability` (see below) as
+**503**, not 409 — there, it's not a booking failure, it's a dependency
+being down, and that distinction is worth keeping visible to a caller.
+
+**Also exposed as its own read endpoint**: `GET
+/api/rooms/availability?date=...`, backed by the same
+`RoomAvailabilityService`, letting a caller preview room capacity before
+attempting a booking — not required by the booking flow itself, but a small
+addition that demonstrates the same external-system-as-source-of-truth
+pattern as a standalone capability, which is a realistic shape for this kind
+of integration in production.
+
+**Test/fixture fallout**: `BookingConcurrencyIT` and local/dev both rely on
+the docker-compose WireMock container's static mappings
+(`wiremock/mappings/room-reservation-availability.json`, returns the 5
+seeded room ids) rather than per-test stubs, so that file needed a new
+mapping. `ExternalIntegrationIT` now stubs a permissive "the room I just
+created is available" response in `@BeforeEach` so its four pre-existing
+tests keep behaving as before, plus new tests proving the external system
+actually narrows candidates and that an empty external response fails
+booking with 409 even when the DB alone would have allowed it.

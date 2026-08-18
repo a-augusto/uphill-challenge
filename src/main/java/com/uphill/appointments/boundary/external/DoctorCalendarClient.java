@@ -11,4 +11,6 @@ import java.util.UUID;
 public interface DoctorCalendarClient {
 
     void reserveSlot(Long doctorId, OffsetDateTime startsAt, OffsetDateTime endsAt, UUID appointmentId);
+
+    void releaseSlot(Long doctorId, OffsetDateTime startsAt, OffsetDateTime endsAt, UUID appointmentId);
 }

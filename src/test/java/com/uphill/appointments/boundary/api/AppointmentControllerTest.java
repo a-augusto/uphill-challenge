@@ -13,6 +13,7 @@ import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentMatchers;
@@ -29,10 +30,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.uphill.appointments.boundary.api.dto.CreateAppointmentRequest;
 import com.uphill.appointments.control.AppointmentAllocationException;
+import com.uphill.appointments.control.AppointmentAlreadyCancelledException;
+import com.uphill.appointments.control.AppointmentNotFoundException;
 import com.uphill.appointments.control.BookingService;
+import com.uphill.appointments.control.CancellationService;
 import com.uphill.appointments.control.PatientNotFoundException;
 import com.uphill.appointments.control.SlotValidationException;
 import com.uphill.appointments.entity.Appointment;
+import com.uphill.appointments.entity.AppointmentStatus;
 import com.uphill.appointments.entity.Doctor;
 import com.uphill.appointments.entity.Patient;
 import com.uphill.appointments.entity.Room;
@@ -47,6 +52,8 @@ class AppointmentControllerTest {
     private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
     @MockitoBean
     private BookingService bookingService;
+    @MockitoBean
+    private CancellationService cancellationService;
     @MockitoBean
     private AppointmentRepository appointmentRepository;
 
@@ -109,6 +116,38 @@ class AppointmentControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(sampleRequest())))
                 .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void cancelReturns200WithCancelledAppointmentDetails() throws Exception {
+        Appointment appointment = sampleAppointment();
+        appointment.setStatus(AppointmentStatus.CANCELLED);
+        appointment.setCancelledAt(OffsetDateTime.now());
+        when(cancellationService.cancel(appointment.getId())).thenReturn(appointment);
+
+        mockMvc.perform(post("/api/appointments/{id}/cancel", appointment.getId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CANCELLED"));
+    }
+
+    @Test
+    void cancelReturns404WhenAppointmentUnknown() throws Exception {
+        UUID unknownId = UUID.randomUUID();
+        when(cancellationService.cancel(unknownId))
+                .thenThrow(new AppointmentNotFoundException("Unknown appointment: " + unknownId));
+
+        mockMvc.perform(post("/api/appointments/{id}/cancel", unknownId))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void cancelReturns409WhenAlreadyCancelled() throws Exception {
+        UUID id = UUID.randomUUID();
+        when(cancellationService.cancel(id))
+                .thenThrow(new AppointmentAlreadyCancelledException("Appointment already cancelled: " + id));
+
+        mockMvc.perform(post("/api/appointments/{id}/cancel", id))
+                .andExpect(status().isConflict());
     }
 
     @Test

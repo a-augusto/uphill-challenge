@@ -7,14 +7,16 @@ CREATE TABLE appointment (
     starts_at      TIMESTAMPTZ  NOT NULL,
     ends_at        TIMESTAMPTZ  NOT NULL,
     status         VARCHAR(20)  NOT NULL DEFAULT 'BOOKED',
-    created_at     TIMESTAMPTZ  NOT NULL DEFAULT now(),
-
-    -- No-overbooking guarantee: a doctor or room can only hold one appointment
-    -- per exact slot start. Enforced here, not just in application code, so it
-    -- holds under concurrent requests racing for the same doctor/room/slot.
-    CONSTRAINT uq_doctor_slot UNIQUE (doctor_id, starts_at),
-    CONSTRAINT uq_room_slot UNIQUE (room_id, starts_at)
+    cancelled_at   TIMESTAMPTZ,
+    created_at     TIMESTAMPTZ  NOT NULL DEFAULT now()
 );
+
+-- No-overbooking guarantee: a doctor or room can only hold one *active*
+-- appointment per exact slot start. Partial (not plain) unique indexes, filtered
+-- to BOOKED rows, so cancelling an appointment frees its doctor/room/slot for
+-- someone else to book — a plain UNIQUE constraint can't express that.
+CREATE UNIQUE INDEX uq_doctor_slot ON appointment (doctor_id, starts_at) WHERE status = 'BOOKED';
+CREATE UNIQUE INDEX uq_room_slot ON appointment (room_id, starts_at) WHERE status = 'BOOKED';
 
 CREATE INDEX idx_appointment_patient_id ON appointment (patient_id);
 CREATE INDEX idx_appointment_specialty_id ON appointment (specialty_id);

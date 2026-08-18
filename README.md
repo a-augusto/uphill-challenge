@@ -5,7 +5,9 @@ Boot service that schedules medical appointments in Portugal. The patient
 picks a specialty and a timeslot; the system auto-assigns an available doctor
 and room, guarantees no doctor or room is ever double-booked, and confirms the
 booking to the patient by email — while updating the doctor's calendar and
-reserving the room in (stubbed) external systems.
+reserving the room in (stubbed) external systems. Appointments can also be
+cancelled, freeing the doctor/room/slot for rebooking, with a symmetric
+release fan-out to the same external systems.
 
 ## Stack
 
@@ -24,6 +26,43 @@ reserving the room in (stubbed) external systems.
 | Testing | JUnit 5, Mockito, Testcontainers (Postgres, Kafka), WireMock, GreenMail |
 | Boilerplate | Lombok |
 
+## System topology
+
+```
+   +------------+   HTTP    +--------------------------------+
+   | Client /   | --------> |      appointments service       |
+   |  Admin     |           |         (Spring Boot)           |
+   +------------+           |                                  |
+                             |  boundary/api -> control ->     |
+                             |  boundary/external               |
+                             +------+--------+---------+-------+
+                                    |        |         |
+                              JPA   |        |         | REST: GET/POST/DELETE
+                                    v        |         v
+                         +----------------+  |   +----------------------------+
+                         |   PostgreSQL   |  |   |   Room-reservation system   |
+                         +----------------+  |   |       (WireMock stub)       |
+                                              |   |  synchronous, gates booking |
+                                     send     |   +----------------------------+
+                                    email     | produce
+                                    v         v
+                   +----------------------+  +----------------------------+
+                   |     SMTP server      |  |    Doctor-calendar broker   |
+                   |   (GreenMail fake)   |  |        (Apache Kafka)       |
+                   |    fire-and-forget   |  |       fire-and-forget       |
+                   +----------------------+  +----------------------------+
+
+        (all boxes above also emit traces/metrics/logs to an
+         OpenTelemetry collector - Grafana LGTM - not drawn here)
+```
+
+Everything except the app itself and Postgres is a stand-in for a real
+external system — WireMock, Kafka, and GreenMail are all real infrastructure
+(not in-process fakes), so the integration code is exercised the same way it
+would be against the genuine services; only the endpoints they talk to are
+local. See [`DECISIONS.md`](./DECISIONS.md) for why each one was modeled
+that way (#006, #018, #021).
+
 ## Architecture at a glance
 
 Package structure follows **Boundary-Control-Entity (BCE)**:
@@ -34,8 +73,9 @@ com.uphill.appointments
 │   ├── api/            inbound HTTP: REST controller, DTOs, error handling
 │   ├── external/         outbound: room-reservation (RestClient) + doctor-calendar (Kafka) ports
 │   └── notification/       outbound: email confirmation
-├── control/            BookingService, allocation/retry logic (incl. room-reservation
-│                       gating), booking exceptions, post-booking event + after-commit fan-out
+├── control/            BookingService (allocation/retry, room-reservation gating),
+│                       RoomAvailabilityService (external day-level room filter),
+│                       CancellationService, lifecycle exceptions, after-commit fan-out
 ├── entity/             domain objects (Specialty, Doctor, Room, Patient, Appointment)
 │   └── repository/       Spring Data JPA repositories
 └── config/             cross-cutting infra config (OpenAPI docs) — outside the BCE triad,
@@ -49,9 +89,17 @@ com.uphill.appointments
 - **Entity** — domain model + persistence.
 
 **Booking flow:** `POST /api/appointments` → `BookingService` (control)
-resolves the specialty, fetches doctors/rooms with that specialty free at
-that slot, and tries to persist an appointment for a candidate doctor+room
-pair. No-overbooking is enforced by a database unique constraint on
+resolves the specialty, fetches doctors free at that slot, and asks
+`RoomAvailabilityService` which rooms the external system reports available
+for that *day* before even considering them as candidates — our own DB
+isn't a sufficient source of truth for room availability on its own, since
+the external facilities system may hold rooms for reasons we have no
+visibility into (maintenance, other departments). That day-level check is a
+pre-filter, not the actual gate: it narrows candidates before the retry loop
+starts, then the existing per-slot DB check and `reserveRoom` call still do
+the real work of avoiding a race between concurrent requests. `BookingService`
+tries to persist an appointment for a candidate doctor+room pair.
+No-overbooking is enforced by a database unique constraint on
 `(doctor_id, starts_at)` and `(room_id, starts_at)` — if a concurrent request
 wins the race for a pair, the insert fails and the service just tries the
 next pair. **Room reservation is part of that same attempt**: a room must
@@ -63,6 +111,63 @@ DB race. Once a booking commits, an `AppointmentBookedEvent` fires the
 doctor-calendar update (published to Kafka, fire-and-forget — nothing in our
 own correctness depends on it) and the confirmation email, both
 best-effort, neither able to fail the already-successful booking response.
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Controller as AppointmentController
+    participant Booking as BookingService
+    participant RoomAvail as RoomAvailabilityService
+    participant External as Room-reservation system
+    participant DB as Postgres
+    participant Executor as BookingAttemptExecutor
+    participant Listener as AppointmentEventListener
+    participant Kafka
+    participant Email
+
+    Client->>Controller: POST /api/appointments
+    Controller->>Booking: book(specialty, patientId, startsAt)
+    Booking->>RoomAvail: availableRoomsOn(date)
+    RoomAvail->>External: GET /rooms/available?date=
+    External-->>RoomAvail: room ids available that day
+    RoomAvail-->>Booking: active rooms ∩ externally available
+    Booking->>DB: doctors/rooms free at this exact slot
+    loop candidate (doctor, room) pairs, until one works
+        Booking->>Executor: attemptBook(doctor, room, ...)
+        Executor->>DB: INSERT appointment (unique constraint)
+        alt lost race on DB constraint
+            DB-->>Executor: constraint violation
+            Executor-->>Booking: try next pair
+        else DB insert ok
+            Executor->>External: POST /rooms/{id}/reservations
+            alt external rejects
+                External-->>Executor: error
+                Executor-->>Booking: roll back, try next pair
+            else external confirms
+                External-->>Executor: 201
+                Executor->>Executor: publish AppointmentBookedEvent
+                Executor-->>Booking: booked Appointment
+            end
+        end
+    end
+    Booking-->>Controller: booked Appointment
+    Controller-->>Client: 201 Created
+    Note over Listener,Email: after commit, best-effort, cannot fail the response above
+    Executor--)Listener: AppointmentBookedEvent
+    Listener--)Kafka: doctor-calendar RESERVED event
+    Listener--)Email: booking confirmation
+```
+
+**Cancellation flow:** `POST /api/appointments/{id}/cancel` →
+`CancellationService` marks the appointment `CANCELLED`. Unlike reserving a
+room, *releasing* it doesn't gate anything — the cancellation is already
+correct the moment our own DB says so, so `AppointmentCancelledEvent` fires
+the same kind of after-commit, best-effort fan-out as booking: release the
+room (WireMock), release the doctor-calendar slot (Kafka), send a
+cancellation email. A cancelled appointment's doctor/room/slot becomes
+available again immediately (the no-overbooking indexes are partial,
+filtered to `status = 'BOOKED'`). "Reschedule" is just cancel + a fresh
+booking call — no dedicated endpoint.
 
 See [`DECISIONS.md`](./DECISIONS.md) for the reasoning behind every
 non-obvious call (why a unique constraint instead of row locking, why
@@ -109,6 +214,19 @@ how to get specialties/doctors/rooms/patients into a fresh database.
 
 ```bash
 curl "http://localhost:8080/api/appointments?specialty=CARDIOLOGY&page=0&size=20"
+```
+
+Preview which rooms the external system reports as available on a given day,
+before booking:
+
+```bash
+curl "http://localhost:8080/api/rooms/availability?date=2026-08-20"
+```
+
+Cancelling frees the doctor/room/slot immediately for rebooking:
+
+```bash
+curl -X POST http://localhost:8080/api/appointments/{id}/cancel
 ```
 
 ## Seeding data
@@ -164,12 +282,13 @@ reachable — point `spring.datasource.*`, `app.integrations.room-reservation.ba
 
 - **No auth** on the admin listing endpoint — out of scope per the spec, but
   the first thing to add before any real traffic. See DECISIONS.md #010.
-- **No durable retry** if the doctor-calendar Kafka publish fails — logged,
-  not retried; the confirmation email has the same gap. A transactional
-  outbox would close this; deliberately not built for a one-week scope. See
-  DECISIONS.md #007. (Room reservation is different: it gates the booking
-  attempt itself now, so a failure there doesn't need durable retry — the
-  candidate pair just doesn't become a booking. See DECISIONS.md #018.)
+- **No durable retry** if a best-effort post-action fails — doctor-calendar
+  Kafka publish, confirmation/cancellation email, or room release on cancel —
+  logged, not retried. A transactional outbox would close this; deliberately
+  not built for a one-week scope. See DECISIONS.md #007. (Room *reservation*
+  during booking is different: it gates the booking attempt itself, so a
+  failure there doesn't need durable retry — the candidate pair just doesn't
+  become a booking. See DECISIONS.md #018, #020.)
 - **Fixed 30-minute slot grid** — the no-overbooking constraint relies on it.
   Variable-duration appointments would need a range-based exclusion
   constraint instead. See DECISIONS.md #005.
@@ -177,3 +296,8 @@ reachable — point `spring.datasource.*`, `app.integrations.room-reservation.ba
   profile's `DevDataSeeder` (see **Seeding data**) or direct DB access;
   there's no registration endpoint. Booking requires a `patientId` to
   already exist. See DECISIONS.md #016, #017.
+- **Booking now has two required external round trips** (day-level
+  availability check, then per-candidate reservation) instead of one — both
+  are synchronous and both can fail the booking (409 on rejection, 503 if
+  the availability check itself can't be reached from the preview endpoint).
+  See DECISIONS.md #021.

@@ -25,7 +25,6 @@ import com.uphill.appointments.entity.Specialty;
 import com.uphill.appointments.entity.repository.AppointmentRepository;
 import com.uphill.appointments.entity.repository.DoctorRepository;
 import com.uphill.appointments.entity.repository.PatientRepository;
-import com.uphill.appointments.entity.repository.RoomRepository;
 import com.uphill.appointments.entity.repository.SpecialtyRepository;
 
 @ExtendWith(MockitoExtension.class)
@@ -36,7 +35,7 @@ class BookingServiceTest {
     @Mock
     private DoctorRepository doctorRepository;
     @Mock
-    private RoomRepository roomRepository;
+    private RoomAvailabilityService roomAvailabilityService;
     @Mock
     private PatientRepository patientRepository;
     @Mock
@@ -57,7 +56,7 @@ class BookingServiceTest {
     @BeforeEach
     void setUp() {
         bookingService = new BookingService(
-                specialtyRepository, doctorRepository, roomRepository, patientRepository,
+                specialtyRepository, doctorRepository, roomAvailabilityService, patientRepository,
                 appointmentRepository, bookingAttemptExecutor);
 
         cardiology = new Specialty();
@@ -96,7 +95,7 @@ class BookingServiceTest {
         when(specialtyRepository.findByCode("CARDIOLOGY")).thenReturn(Optional.of(cardiology));
         when(patientRepository.findByPatientId("PAT-0001")).thenReturn(Optional.of(patient));
         when(doctorRepository.findBySpecialtyAndActiveTrue(cardiology)).thenReturn(List.of(drA));
-        when(roomRepository.findByActiveTrue()).thenReturn(List.of(room1));
+        when(roomAvailabilityService.availableRoomsOn(any())).thenReturn(List.of(room1));
         when(appointmentRepository.findBookedDoctorIdsAtSlot(any(), any())).thenReturn(List.of());
         when(appointmentRepository.findBookedRoomIdsAtSlot(any(), any())).thenReturn(List.of());
         when(bookingAttemptExecutor.attemptBook(any(), any(), any(), any(), any(), any()))
@@ -118,7 +117,7 @@ class BookingServiceTest {
         when(specialtyRepository.findByCode("CARDIOLOGY")).thenReturn(Optional.of(cardiology));
         when(patientRepository.findByPatientId("PAT-0001")).thenReturn(Optional.of(patient));
         when(doctorRepository.findBySpecialtyAndActiveTrue(cardiology)).thenReturn(List.of(drA, drB));
-        when(roomRepository.findByActiveTrue()).thenReturn(List.of(room1, room2));
+        when(roomAvailabilityService.availableRoomsOn(any())).thenReturn(List.of(room1, room2));
         when(appointmentRepository.findBookedDoctorIdsAtSlot(any(), any())).thenReturn(List.of());
         when(appointmentRepository.findBookedRoomIdsAtSlot(any(), any())).thenReturn(List.of());
         when(bookingAttemptExecutor.attemptBook(any(), any(), any(), any(), any(), any()))
@@ -140,7 +139,7 @@ class BookingServiceTest {
         when(specialtyRepository.findByCode("CARDIOLOGY")).thenReturn(Optional.of(cardiology));
         when(patientRepository.findByPatientId("PAT-0001")).thenReturn(Optional.of(patient));
         when(doctorRepository.findBySpecialtyAndActiveTrue(cardiology)).thenReturn(List.of(drA, drB));
-        when(roomRepository.findByActiveTrue()).thenReturn(List.of(room1, room2));
+        when(roomAvailabilityService.availableRoomsOn(any())).thenReturn(List.of(room1, room2));
         when(appointmentRepository.findBookedDoctorIdsAtSlot(any(), any())).thenReturn(List.of());
         when(appointmentRepository.findBookedRoomIdsAtSlot(any(), any())).thenReturn(List.of());
         when(bookingAttemptExecutor.attemptBook(any(), any(), any(), any(), any(), any()))
@@ -162,7 +161,7 @@ class BookingServiceTest {
         when(specialtyRepository.findByCode("CARDIOLOGY")).thenReturn(Optional.of(cardiology));
         when(patientRepository.findByPatientId("PAT-0001")).thenReturn(Optional.of(patient));
         when(doctorRepository.findBySpecialtyAndActiveTrue(cardiology)).thenReturn(List.of(drA));
-        when(roomRepository.findByActiveTrue()).thenReturn(List.of(room1));
+        when(roomAvailabilityService.availableRoomsOn(any())).thenReturn(List.of(room1));
         when(appointmentRepository.findBookedDoctorIdsAtSlot(any(), any())).thenReturn(List.of());
         when(appointmentRepository.findBookedRoomIdsAtSlot(any(), any())).thenReturn(List.of());
         when(bookingAttemptExecutor.attemptBook(any(), any(), any(), any(), any(), any()))
@@ -177,11 +176,24 @@ class BookingServiceTest {
         when(specialtyRepository.findByCode("CARDIOLOGY")).thenReturn(Optional.of(cardiology));
         when(patientRepository.findByPatientId("PAT-0001")).thenReturn(Optional.of(patient));
         when(doctorRepository.findBySpecialtyAndActiveTrue(cardiology)).thenReturn(List.of(drA));
-        when(roomRepository.findByActiveTrue()).thenReturn(List.of(room1));
+        when(roomAvailabilityService.availableRoomsOn(any())).thenReturn(List.of(room1));
         when(appointmentRepository.findBookedDoctorIdsAtSlot(any(), any())).thenReturn(List.of());
         when(appointmentRepository.findBookedRoomIdsAtSlot(any(), any())).thenReturn(List.of());
         when(bookingAttemptExecutor.attemptBook(any(), any(), any(), any(), any(), any()))
                 .thenThrow(new DataIntegrityViolationException("unique violation"));
+
+        assertThatThrownBy(() -> bookingService.book("CARDIOLOGY", "PAT-0001", startsAt))
+                .isInstanceOf(AppointmentAllocationException.class);
+    }
+
+    @Test
+    void throwsAllocationExceptionWhenRoomAvailabilityCheckFails() {
+        when(specialtyRepository.findByCode("CARDIOLOGY")).thenReturn(Optional.of(cardiology));
+        when(patientRepository.findByPatientId("PAT-0001")).thenReturn(Optional.of(patient));
+        when(doctorRepository.findBySpecialtyAndActiveTrue(cardiology)).thenReturn(List.of(drA));
+        when(appointmentRepository.findBookedDoctorIdsAtSlot(any(), any())).thenReturn(List.of());
+        when(roomAvailabilityService.availableRoomsOn(any()))
+                .thenThrow(new RoomAvailabilityCheckFailedException("external system down", new RuntimeException()));
 
         assertThatThrownBy(() -> bookingService.book("CARDIOLOGY", "PAT-0001", startsAt))
                 .isInstanceOf(AppointmentAllocationException.class);

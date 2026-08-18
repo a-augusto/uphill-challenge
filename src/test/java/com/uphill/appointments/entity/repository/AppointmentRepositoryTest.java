@@ -16,6 +16,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.dao.DataIntegrityViolationException;
 
 import com.uphill.appointments.entity.Appointment;
+import com.uphill.appointments.entity.AppointmentStatus;
 import com.uphill.appointments.entity.Doctor;
 import com.uphill.appointments.entity.Patient;
 import com.uphill.appointments.entity.Room;
@@ -99,6 +100,27 @@ class AppointmentRepositoryTest {
                 appointmentRepository.saveAndFlush(newAppointment(patient, specialty, doctorB, room2, startsAt));
 
         assertThat(second.getId()).isNotNull();
+    }
+
+    @Test
+    void cancelledAppointmentFreesItsDoctorAndRoomSlotForRebooking() {
+        Specialty specialty = fixtures.createSpecialty();
+        Patient patient = fixtures.createPatient();
+        Doctor doctor = fixtures.createDoctor(specialty);
+        Room room = fixtures.createRoom();
+        OffsetDateTime startsAt = futureSlot();
+
+        Appointment original =
+                appointmentRepository.saveAndFlush(newAppointment(patient, specialty, doctor, room, startsAt));
+
+        original.setStatus(AppointmentStatus.CANCELLED);
+        original.setCancelledAt(OffsetDateTime.now());
+        appointmentRepository.saveAndFlush(original);
+
+        Appointment rebooked =
+                appointmentRepository.saveAndFlush(newAppointment(patient, specialty, doctor, room, startsAt));
+
+        assertThat(rebooked.getId()).isNotNull().isNotEqualTo(original.getId());
     }
 
     private static Appointment newAppointment(

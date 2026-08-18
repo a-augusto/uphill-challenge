@@ -8,5 +8,7 @@ import java.util.UUID;
  * calendar system (outside this app) would own its own consumer for this
  * topic — we're only responsible for reliably publishing it.
  */
-public record DoctorCalendarUpdateEvent(UUID appointmentId, Long doctorId, OffsetDateTime startsAt, OffsetDateTime endsAt) {
+public record DoctorCalendarUpdateEvent(
+        UUID appointmentId, Long doctorId, OffsetDateTime startsAt, OffsetDateTime endsAt,
+        DoctorCalendarEventType type) {
 }

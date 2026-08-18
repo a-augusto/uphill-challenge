@@ -34,11 +34,23 @@ public class KafkaDoctorCalendarClient implements DoctorCalendarClient {
 
     @Override
     public void reserveSlot(Long doctorId, OffsetDateTime startsAt, OffsetDateTime endsAt, UUID appointmentId) {
-        DoctorCalendarUpdateEvent event = new DoctorCalendarUpdateEvent(appointmentId, doctorId, startsAt, endsAt);
-        kafkaTemplate.send(topic, appointmentId.toString(), event)
+        publish(new DoctorCalendarUpdateEvent(
+                appointmentId, doctorId, startsAt, endsAt, DoctorCalendarEventType.RESERVED));
+    }
+
+    @Override
+    public void releaseSlot(Long doctorId, OffsetDateTime startsAt, OffsetDateTime endsAt, UUID appointmentId) {
+        publish(new DoctorCalendarUpdateEvent(
+                appointmentId, doctorId, startsAt, endsAt, DoctorCalendarEventType.RELEASED));
+    }
+
+    private void publish(DoctorCalendarUpdateEvent event) {
+        kafkaTemplate.send(topic, event.appointmentId().toString(), event)
                 .whenComplete((result, ex) -> {
                     if (ex != null) {
-                        log.error("Failed to publish doctor-calendar update for appointment {}", appointmentId, ex);
+                        log.error(
+                                "Failed to publish doctor-calendar {} event for appointment {}",
+                                event.type(), event.appointmentId(), ex);
                     }
                 });
     }

@@ -1,6 +1,8 @@
 package com.uphill.appointments.boundary.external.restclient;
 
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.UUID;
 
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -19,6 +21,15 @@ public class RestClientRoomReservationClient implements RoomReservationClient {
     }
 
     @Override
+    public List<Long> findAvailableRoomIds(LocalDate date) {
+        AvailableRoomsResponse response = restClient.get()
+                .uri("/rooms/available?date={date}", date)
+                .retrieve()
+                .body(AvailableRoomsResponse.class);
+        return response != null ? response.roomIds() : List.of();
+    }
+
+    @Override
     public void reserveRoom(Long roomId, OffsetDateTime startsAt, OffsetDateTime endsAt, UUID appointmentId) {
         restClient.post()
                 .uri("/rooms/{roomId}/reservations", roomId)
@@ -27,6 +38,17 @@ public class RestClientRoomReservationClient implements RoomReservationClient {
                 .toBodilessEntity();
     }
 
+    @Override
+    public void releaseRoom(Long roomId, UUID appointmentId) {
+        restClient.delete()
+                .uri("/rooms/{roomId}/reservations/{appointmentId}", roomId, appointmentId)
+                .retrieve()
+                .toBodilessEntity();
+    }
+
     private record ReserveRoomRequest(UUID appointmentId, OffsetDateTime startsAt, OffsetDateTime endsAt) {
+    }
+
+    private record AvailableRoomsResponse(List<Long> roomIds) {
     }
 }

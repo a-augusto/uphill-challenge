@@ -19,7 +19,6 @@ import com.uphill.appointments.entity.Specialty;
 import com.uphill.appointments.entity.repository.AppointmentRepository;
 import com.uphill.appointments.entity.repository.DoctorRepository;
 import com.uphill.appointments.entity.repository.PatientRepository;
-import com.uphill.appointments.entity.repository.RoomRepository;
 import com.uphill.appointments.entity.repository.SpecialtyRepository;
 
 import lombok.RequiredArgsConstructor;
@@ -41,7 +40,7 @@ public class BookingService {
 
     private final SpecialtyRepository specialtyRepository;
     private final DoctorRepository doctorRepository;
-    private final RoomRepository roomRepository;
+    private final RoomAvailabilityService roomAvailabilityService;
     private final PatientRepository patientRepository;
     private final AppointmentRepository appointmentRepository;
     private final BookingAttemptExecutor bookingAttemptExecutor;
@@ -104,7 +103,12 @@ public class BookingService {
     }
 
     private List<Room> availableRooms(OffsetDateTime startsAt) {
-        List<Room> rooms = roomRepository.findByActiveTrue();
+        List<Room> rooms;
+        try {
+            rooms = roomAvailabilityService.availableRoomsOn(startsAt.toLocalDate());
+        } catch (RoomAvailabilityCheckFailedException e) {
+            throw new AppointmentAllocationException("Unable to determine room availability: " + e.getMessage());
+        }
         List<Long> roomIds = rooms.stream().map(Room::getId).toList();
         Set<Long> booked = roomIds.isEmpty()
                 ? Set.of()

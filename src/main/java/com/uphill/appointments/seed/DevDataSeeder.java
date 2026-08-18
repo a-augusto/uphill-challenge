@@ -101,8 +101,11 @@ public class DevDataSeeder implements CommandLineRunner {
         List<Doctor> doctors = new ArrayList<>();
         for (Specialty specialty : specialties) {
             for (int i = 0; i < DOCTORS_PER_SPECIALTY; i++) {
+                // firstName()/lastName() rather than fullName(): DataFaker's fullName()
+                // can itself prepend a prefix (Mr./Ms./Dr.), stacking into "Dr. Mr. Rita
+                // Braun" on top of the one added here.
                 Doctor doctor = new Doctor();
-                doctor.setName("Dr. " + faker.name().fullName());
+                doctor.setName("Dr. " + faker.name().firstName() + " " + faker.name().lastName());
                 doctor.setSpecialty(specialty);
                 doctor.setActive(true);
                 doctors.add(doctorRepository.save(doctor));
@@ -137,10 +140,17 @@ public class DevDataSeeder implements CommandLineRunner {
         Random random = new Random();
         Gender[] genders = Gender.values();
         for (int i = 1; i <= PATIENT_COUNT; i++) {
+            // firstName/lastName generated once and reused for both the display
+            // name and the email's local part, so seeded patients look like one
+            // coherent person instead of a random name paired with an unrelated
+            // stranger's inbox (the previous faker.name().fullName() +
+            // faker.internet().emailAddress() combo drew independently).
+            String firstName = faker.name().firstName();
+            String lastName = faker.name().lastName();
             Patient patient = new Patient();
             patient.setPatientId("PAT-%06d".formatted(i));
-            patient.setName(faker.name().fullName());
-            patient.setEmail(faker.internet().emailAddress());
+            patient.setName(firstName + " " + lastName);
+            patient.setEmail(faker.internet().safeEmailAddress(firstName + "." + lastName));
             patient.setPhone(faker.phoneNumber().phoneNumber());
             patient.setGender(genders[random.nextInt(genders.length)]);
             patient.setDateOfBirth(toLocalDate(faker.date().birthday(1, 95)));

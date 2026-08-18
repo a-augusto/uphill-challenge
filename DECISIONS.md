@@ -1529,3 +1529,29 @@ how expensive that one giant query is. `default-page-size=20` alongside it
 purely for symmetry with the admin page's own hardcoded `PAGE_SIZE = 20` —
 that page builds its `PageRequest` directly rather than through this
 resolver, so it was never affected by the missing cap in the first place.
+
+### 042 — `DevDataSeeder`: patient name and email no longer strangers to each other
+
+Spotted while poking at GreenMail during the observability walkthrough: a
+booking confirmation addressed to "Ms. Shae Zemlak" landed in
+`louie.schimmel@gmail.com`'s inbox. Cause was `seedPatients` calling
+`faker.name().fullName()` and `faker.internet().emailAddress()`
+independently — two unrelated draws from DataFaker, so name and mailbox
+never had any reason to agree. Harmless for what this seeder is for (demo
+volume, not demo realism), but the kind of thing that looks broken the
+moment someone actually reads an email during a walkthrough.
+
+Fixed by drawing `firstName`/`lastName` once and reusing both halves:
+the display name, and `faker.internet().safeEmailAddress(firstName +
+"." + lastName)` for the mailbox. Switched to `safeEmailAddress` over
+plain `emailAddress` while touching this anyway — RFC 2606 reserved
+domains (`example.com` and friends) rather than domains that happen to
+look like real ones, which is the more correct choice for fixture data
+regardless of the name/email mismatch this entry is actually about.
+
+**Same pass, doctors too**: `seedDoctors` built names as `"Dr. " +
+faker.name().fullName()` — DataFaker's `fullName()` can itself prepend a
+prefix (Mr./Ms./Dr.), so this occasionally stacked into `"Dr. Mr. Rita
+Braun"`. Switched to `"Dr. " + firstName() + " " + lastName()`, same fix
+shape as the patient one: stop asking DataFaker for a whole assembled
+identity when only the parts that can't collide are actually needed.

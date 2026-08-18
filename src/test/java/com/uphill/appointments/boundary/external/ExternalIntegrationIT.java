@@ -48,6 +48,7 @@ import com.uphill.appointments.entity.Patient;
 import com.uphill.appointments.entity.Room;
 import com.uphill.appointments.entity.Specialty;
 import com.uphill.appointments.entity.repository.DoctorRepository;
+import com.uphill.appointments.entity.repository.DoctorScheduleRepository;
 import com.uphill.appointments.entity.repository.PatientRepository;
 import com.uphill.appointments.entity.repository.RoomRepository;
 import com.uphill.appointments.entity.repository.SpecialtyRepository;
@@ -83,6 +84,8 @@ class ExternalIntegrationIT {
     @Autowired
     private DoctorRepository doctorRepository;
     @Autowired
+    private DoctorScheduleRepository doctorScheduleRepository;
+    @Autowired
     private RoomRepository roomRepository;
     @Autowired
     private PatientRepository patientRepository;
@@ -102,7 +105,7 @@ class ExternalIntegrationIT {
         // (e.g. room-reservation always failing) can't leak into another.
         wireMock.resetAll();
         TestDataFactory fixtures =
-                new TestDataFactory(specialtyRepository, doctorRepository, roomRepository, patientRepository);
+                new TestDataFactory(specialtyRepository, doctorRepository, doctorScheduleRepository, roomRepository, patientRepository);
         specialty = fixtures.createSpecialty();
         fixtures.createDoctor(specialty);
         room = fixtures.createRoom();
@@ -195,7 +198,7 @@ class ExternalIntegrationIT {
 
     @Test
     void bookingOnlyUsesExternallyAvailableRooms() {
-        Room excludedRoom = new TestDataFactory(specialtyRepository, doctorRepository, roomRepository, patientRepository)
+        Room excludedRoom = new TestDataFactory(specialtyRepository, doctorRepository, doctorScheduleRepository, roomRepository, patientRepository)
                 .createRoom();
         wireMock.stubFor(get(urlPathMatching("/rooms/available"))
                 .willReturn(okJson("{\"roomIds\":[" + room.getId() + "]}")));
@@ -221,7 +224,7 @@ class ExternalIntegrationIT {
 
     @Test
     void roomAvailabilityEndpointReturnsExternallyAvailableRooms() {
-        Room excludedRoom = new TestDataFactory(specialtyRepository, doctorRepository, roomRepository, patientRepository)
+        Room excludedRoom = new TestDataFactory(specialtyRepository, doctorRepository, doctorScheduleRepository, roomRepository, patientRepository)
                 .createRoom();
         wireMock.stubFor(get(urlPathMatching("/rooms/available"))
                 .willReturn(okJson("{\"roomIds\":[" + room.getId() + "]}")));
@@ -237,8 +240,34 @@ class ExternalIntegrationIT {
                 .doesNotContain(excludedRoom.getId());
     }
 
+    @Test
+    void dayOnlyBookingFindsSlotAfterExistingMorningBooking() {
+        wireMock.stubFor(post(urlPathMatching("/rooms/.*/reservations")).willReturn(created()));
+        OffsetDateTime morningStart = OffsetDateTime.now().plus(Duration.ofDays(5))
+                .withHour(9).withMinute(0).withSecond(0).withNano(0);
+        CreateAppointmentRequest morningRequest = new CreateAppointmentRequest(
+                patient.getPatientId(), specialty.getCode(), morningStart.toLocalDate(),
+                morningStart.toLocalTime(), morningStart.getOffset(), 180);
+        ResponseEntity<AppointmentResponse> morningResponse =
+                restTemplate.postForEntity("/api/appointments", morningRequest, AppointmentResponse.class);
+        assertThat(morningResponse.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+
+        CreateAppointmentRequest dayOnlyRequest = new CreateAppointmentRequest(
+                patient.getPatientId(), specialty.getCode(), morningStart.toLocalDate(),
+                null, morningStart.getOffset(), 30);
+        ResponseEntity<AppointmentResponse> dayOnlyResponse =
+                restTemplate.postForEntity("/api/appointments", dayOnlyRequest, AppointmentResponse.class);
+
+        assertThat(dayOnlyResponse.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        // Compare instants, not toLocalTime(): Postgres round-trips TIMESTAMPTZ in a
+        // normalized offset, so the response's offset need not match morningStart's.
+        assertThat(dayOnlyResponse.getBody().startsAt()).isAfterOrEqualTo(morningStart.plusMinutes(180));
+    }
+
     private CreateAppointmentRequest sampleRequest() {
         OffsetDateTime startsAt = OffsetDateTime.now().plus(Duration.ofDays(3)).truncatedTo(ChronoUnit.HOURS);
-        return new CreateAppointmentRequest(patient.getPatientId(), specialty.getCode(), startsAt);
+        return new CreateAppointmentRequest(
+                patient.getPatientId(), specialty.getCode(), startsAt.toLocalDate(),
+                startsAt.toLocalTime(), startsAt.getOffset(), null);
     }
 }

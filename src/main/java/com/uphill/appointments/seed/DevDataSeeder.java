@@ -1,6 +1,8 @@
 package com.uphill.appointments.seed;
 
+import java.time.DayOfWeek;
 import java.time.LocalDate;
+import java.time.LocalTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -13,11 +15,13 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 import com.uphill.appointments.entity.Doctor;
+import com.uphill.appointments.entity.DoctorSchedule;
 import com.uphill.appointments.entity.Gender;
 import com.uphill.appointments.entity.Patient;
 import com.uphill.appointments.entity.Room;
 import com.uphill.appointments.entity.Specialty;
 import com.uphill.appointments.entity.repository.DoctorRepository;
+import com.uphill.appointments.entity.repository.DoctorScheduleRepository;
 import com.uphill.appointments.entity.repository.PatientRepository;
 import com.uphill.appointments.entity.repository.RoomRepository;
 import com.uphill.appointments.entity.repository.SpecialtyRepository;
@@ -52,9 +56,14 @@ public class DevDataSeeder implements CommandLineRunner {
     private static final int ROOM_COUNT = 5;
     private static final int PATIENT_COUNT = 30;
     private static final List<String> LANGUAGE_POOL = List.of("pt", "en", "es", "fr", "de");
+    private static final LocalTime WORK_DAY_START = LocalTime.of(9, 0);
+    private static final LocalTime WORK_DAY_END = LocalTime.of(18, 0);
+    private static final List<DayOfWeek> WORK_DAYS =
+            List.of(DayOfWeek.MONDAY, DayOfWeek.TUESDAY, DayOfWeek.WEDNESDAY, DayOfWeek.THURSDAY, DayOfWeek.FRIDAY);
 
     private final SpecialtyRepository specialtyRepository;
     private final DoctorRepository doctorRepository;
+    private final DoctorScheduleRepository doctorScheduleRepository;
     private final RoomRepository roomRepository;
     private final PatientRepository patientRepository;
 
@@ -67,13 +76,14 @@ public class DevDataSeeder implements CommandLineRunner {
 
         Faker faker = new Faker();
         List<Specialty> specialties = seedSpecialties();
-        int doctorCount = seedDoctors(faker, specialties);
+        List<Doctor> doctors = seedDoctors(faker, specialties);
+        seedDoctorSchedules(doctors);
         seedRooms();
         seedPatients(faker);
 
         log.info(
                 "Seeded {} specialties, {} doctors, {} rooms, {} patients.",
-                specialties.size(), doctorCount, ROOM_COUNT, PATIENT_COUNT);
+                specialties.size(), doctors.size(), ROOM_COUNT, PATIENT_COUNT);
     }
 
     private List<Specialty> seedSpecialties() {
@@ -87,19 +97,31 @@ public class DevDataSeeder implements CommandLineRunner {
         return specialties;
     }
 
-    private int seedDoctors(Faker faker, List<Specialty> specialties) {
-        int count = 0;
+    private List<Doctor> seedDoctors(Faker faker, List<Specialty> specialties) {
+        List<Doctor> doctors = new ArrayList<>();
         for (Specialty specialty : specialties) {
             for (int i = 0; i < DOCTORS_PER_SPECIALTY; i++) {
                 Doctor doctor = new Doctor();
                 doctor.setName("Dr. " + faker.name().fullName());
                 doctor.setSpecialty(specialty);
                 doctor.setActive(true);
-                doctorRepository.save(doctor);
-                count++;
+                doctors.add(doctorRepository.save(doctor));
             }
         }
-        return count;
+        return doctors;
+    }
+
+    private void seedDoctorSchedules(List<Doctor> doctors) {
+        for (Doctor doctor : doctors) {
+            for (DayOfWeek day : WORK_DAYS) {
+                DoctorSchedule schedule = new DoctorSchedule();
+                schedule.setDoctor(doctor);
+                schedule.setDayOfWeek(day);
+                schedule.setStartTime(WORK_DAY_START);
+                schedule.setEndTime(WORK_DAY_END);
+                doctorScheduleRepository.save(schedule);
+            }
+        }
     }
 
     private void seedRooms() {

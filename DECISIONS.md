@@ -503,3 +503,208 @@ created is available" response in `@BeforeEach` so its four pre-existing
 tests keep behaving as before, plus new tests proving the external system
 actually narrows candidates and that an empty external response fails
 booking with 409 even when the DB alone would have allowed it.
+
+### 022 — Appointments get flexible day/duration instead of a fixed 30-minute grid (business requirement, not yet implemented)
+Requirement change, captured as stated so it can be designed properly before
+any code changes — this entry records the rule, not an implementation:
+
+- Rooms (and by extension, doctors) must be bookable at **any time of day**,
+  not just standard business hours — this models a hospital, which doesn't
+  close.
+- The caller chooses both the **day** and the **duration** of an
+  appointment, not just a slot from a fixed grid.
+- **Max duration: 8 hours** — a healthcare professional's standard workday,
+  no overtime.
+- **Defaults when only a day is given** (no explicit time): standard slot
+  duration of **30 minutes**, placed within **extended business hours,
+  9am–6pm**.
+
+This directly supersedes the "fixed 30-minute slot grid" gap flagged back in
+#005, which already called out that variable-duration appointments would
+need a range-based exclusion constraint instead of the current exact-match
+unique index — that's now the concrete next step, not a hypothetical one.
+Not designed or built yet; logged now per explicit request, to be scoped as
+its own step before implementation starts.
+
+### 023 — Flexible-duration appointments: resolved design questions
+Ten open questions from #022 were worked through one at a time before any
+implementation. Still not built — this entry records the answers so the
+eventual implementation plan has a settled spec to build against.
+
+- **Start-time granularity: 15-minute grid.** Start times must align to
+  :00/:15/:30/:45. Keeps the day-search space bounded and predictable, while
+  being finer than today's 30-minute grid.
+- **Minimum duration: 15 minutes.** Matches the start grid — the smallest
+  meaningful unit at that granularity.
+- **Duration granularity: multiples of 15 minutes**, up to the 8-hour max
+  from #022. One unit (15 min) now governs start-time alignment, minimum
+  duration, and duration step — a single knob instead of three independent
+  ones.
+- **No buffer/turnover time between appointments in the same room.**
+  Back-to-back is allowed — one appointment can start the instant the
+  previous one in that room ends. Room cleaning/turnover is an operational
+  concern outside this system's scope, not modeled. Keeps the eventual range-
+  exclusion constraint a plain overlap check (touching ranges don't exclude).
+- **Doctors get working hours now, not deferred.** Doctor availability was
+  going to eventually need this anyway; folding it into this step means the
+  "any time" room requirement and doctor availability are designed together
+  instead of the doctor side becoming its own follow-up gap.
+- **Doctor hours model: per-day-of-week schedule**, not a single daily
+  window. A new entity (working title `DoctorSchedule`) — one working-hours
+  range per day-of-week per doctor; a day with no entry means the doctor is
+  off that day. Bigger than a two-column addition to `Doctor`, but it's the
+  realistic shape (weekends off, half-days, etc.) and avoids modeling
+  something admittedly wrong just to save a table.
+- **Timezone for business-hours defaults and doctor schedules: whatever
+  offset the caller sends**, not a fixed Europe/Lisbon anchor. "9am" in the
+  default window and in a doctor's schedule is evaluated against the
+  `OffsetDateTime`'s own offset, not converted to a fixed hospital timezone.
+- **Request shape: `date` + optional `startTime` + optional
+  `durationMinutes`**, replacing the single `startsAt` on
+  `CreateAppointmentRequest`. Explicit absence (missing `startTime` /
+  `durationMinutes`) rather than a sentinel value — a midnight `startsAt`
+  can't mean "no time given" once midnight is itself a valid bookable time
+  under the "any time" rule.
+- **Day-only fallback: fails within the 9am–6pm default window**, does not
+  silently expand to the full day. If nothing fits in business hours that
+  day, the caller gets a 409 and has to explicitly ask for a time outside
+  9–6 — auto-expanding would make the default meaningless as an actual
+  boundary rather than a soft preference.
+- **Day-only search strategy: compute each active doctor's and room's free
+  time windows for the day upfront (from existing bookings + doctor
+  schedule), then intersect** to find (doctor, room, time) candidates that
+  fit the requested/default duration — not blind first-fit stepping through
+  15-minute increments. More work to design than reusing the existing
+  candidate-pair retry loop as an inner step, but avoids an arbitrary
+  attempts cap on top of an already-bounded search space, and is honest
+  about being a real interval-intersection problem rather than trial and
+  error.
+
+### 024 — Flexible-duration appointments, Stage 1: built (explicit time only)
+Implements the schema/duration/doctor-schedule half of #023. Stage 2
+(day-only search) is a separate follow-up, not built here.
+
+**No-overbooking moved from a unique index to a range-exclusion
+constraint.** The old partial `UNIQUE (doctor_id, starts_at)` /
+`UNIQUE (room_id, starts_at)` indexes only worked because every appointment
+had the same duration — two appointments with different `starts_at` can now
+overlap (9:00–9:45 and 9:30–10:00). Replaced with:
+```sql
+CREATE EXTENSION IF NOT EXISTS btree_gist;
+ALTER TABLE appointment ADD CONSTRAINT excl_doctor_overlap
+    EXCLUDE USING gist (doctor_id WITH =, tstzrange(starts_at, ends_at) WITH &&)
+    WHERE (status = 'BOOKED');
+-- same for room_id
+```
+`btree_gist` lets GiST support equality on a bigint alongside the range `&&`
+operator — without it, Postgres can't build this index type over a mixed
+scalar+range key. `tstzrange`'s default `[)` bounds (inclusive start,
+exclusive end) are exactly the no-buffer decision from #023: an appointment
+ending at 10:00 and one starting at 10:00 in the same room don't overlap, so
+back-to-back booking is allowed. No new column: the range is computed from
+the existing `starts_at`/`ends_at` at constraint-check time, so nothing
+changed in how `Appointment` maps to the table. Edited `V3` in place, same
+standing pre-prod permission as every prior schema change this session.
+Postgres reports exclusion violations under the same integrity-violation
+SQLSTATE class as unique violations, so Spring still translates them to
+`DataIntegrityViolationException` — `BookingService`'s retry loop needed no
+change to keep catching them.
+
+**Doctors now have working hours.** New `doctor_schedule` table (own
+migration, `V4` — a new table, not an edit to existing structure): one row
+per doctor per day-of-week they work, `start_time`/`end_time`; no row for a
+day means the doctor is off. `BookingService.availableDoctors` now filters
+candidates to doctors whose schedule for `startsAt`'s day-of-week fully
+contains the requested `[startsAt, endsAt)` range, on top of the existing
+active + not-already-booked filters. A doctor with no schedule row that day
+isn't a validation error, it's just not a candidate — same treatment as
+"already booked."
+
+**Appointments can't cross midnight.** A single day-of-week schedule row
+can't express a range spanning two calendar days, so `BookingService.book`
+explicitly rejects `startsAt`/`endsAt` falling on different dates
+(`SlotValidationException`). Documented simplification, not an oversight —
+crossing midnight would need either a two-row schedule lookup or a
+different schedule representation entirely, and nothing in the stated
+requirements needs it yet.
+
+**Bug fixed along the way**: the old `findBookedDoctorIdsAtSlot`/
+`findBookedRoomIdsAtSlot` queries had no `status = 'BOOKED'` filter at all —
+a cancelled appointment at the same exact instant could have incorrectly
+excluded a doctor/room from candidacy at the application-filter level (the
+DB constraint itself was never affected, since it was already scoped to
+`BOOKED` rows). The new overlap queries
+(`findBookedDoctorIdsOverlapping`/`findBookedRoomIdsOverlapping`) filter on
+status explicitly.
+
+**Duration/grid rules enforced in `BookingService`, not the DB**: 15-minute
+start-time grid, 15-minute minimum, 15-minute duration multiples, 8-hour
+max — all via the existing `SlotValidationException` (400), no new
+exception type needed. Default duration is 30 minutes when
+`durationMinutes` is omitted.
+
+**Request shape**: `CreateAppointmentRequest` replaced `startsAt` with
+`date` + `startTime` (both required for this stage) + `offset` (required,
+explicit — consistent with #019's stance on never defaulting an
+`OffsetDateTime`'s zone) + `durationMinutes` (optional, defaults to 30).
+`startTime` becomes optional when Stage 2 (day-only search) ships.
+
+**Test fixture change**: `TestDataFactory.createDoctor` now also inserts a
+permissive all-week, all-day schedule — otherwise every existing
+integration test that creates a doctor would suddenly find zero candidates
+purely because of this new gating dimension, unrelated to what those tests
+actually check.
+
+### 025 — Flexible-duration appointments, Stage 2: day-only search built
+Implements the other half of #023: `CreateAppointmentRequest.startTime` is
+now genuinely optional. Omitting it routes to
+`BookingService.bookOnDay(specialtyCode, patientId, date, offset,
+durationMinutes)`, which searches for a free doctor/room/time within
+extended business hours (9am–6pm) instead of requiring an exact instant.
+
+**Interval math extracted into a pure, dependency-free helper**
+(`control/Interval`, `control/FreeWindowFinder`) rather than folded into
+`BookingService` directly — `freeWindows(bound, busy)` clips/merges busy
+ranges and returns the gaps; `intersect(a, b)` merges two free-interval
+lists into their overlap. Both are plain interval arithmetic with no I/O,
+so they're unit-tested directly (`FreeWindowFinderTest`) without any
+mocking — the kind of logic that's cheap to get exactly right in isolation
+and expensive to debug once it's tangled into a service method.
+
+**Search shape, per #023's decision**: one query for all candidate doctors'
+booked appointments overlapping the business window that day, one for all
+candidate rooms', grouped in memory into per-doctor/per-room `Interval`
+lists — O(1) queries regardless of doctor/room count, not N queries or
+blind time-stepping. For each (doctor, room) pair: the doctor's free
+windows (their `DoctorSchedule` range for that day-of-week, intersected
+with the business window, minus their bookings) intersected with the
+room's free windows (business window minus its bookings) — first gap that
+fits the requested/default duration becomes that pair's one candidate.
+
+**Shared retry logic, factored out as real reuse, not speculation**: both
+`book` (explicit time) and `bookOnDay` now build a `List<Candidate>`
+(`doctor, room, startsAt, endsAt`) and hand it to a single
+`tryBookCandidates` — the exact same
+`DataIntegrityViolationException`/`RoomReservationFailedException`
+handling and `MAX_BOOKING_ATTEMPTS` cap that already existed, just no
+longer duplicated. The Stage 1 range-exclusion constraint is still the only
+thing that actually prevents a race between concurrent requests — this
+pre-computation is a candidate list, same as the explicit-time path's
+doctor×room cartesian product; a lost race just falls through to the next
+candidate exactly like a rejected reservation always has.
+
+**New rule not covered by #023's original Q&A**: when `date` is *today* (in
+the caller's `offset`), the effective window start is bumped from the fixed
+9am to `max(9am, now rounded up to the next 15-minute grid line)` —
+otherwise the search could hand back a start time already in the past.
+Discovered as a necessary consequence while implementing, not a
+speculative addition. **Not covered by a deterministic unit test** — doing
+so properly would need injecting a `Clock` into `BookingService` (not
+introduced, since nothing else in the class needs one), so this specific
+edge is verified by live smoke test instead of `BookingServiceTest`;
+documenting that gap explicitly rather than pretending it's covered.
+
+**Still fails, does not auto-expand**, per #023: if nothing fits within
+9am–6pm that day, `bookOnDay` throws `AppointmentAllocationException` (409)
+even if the same doctor/room/day would work outside that window via an
+explicit `startTime`.

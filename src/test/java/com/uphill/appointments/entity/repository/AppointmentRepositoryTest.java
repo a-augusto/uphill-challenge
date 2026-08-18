@@ -40,6 +40,8 @@ class AppointmentRepositoryTest {
     @Autowired
     private DoctorRepository doctorRepository;
     @Autowired
+    private DoctorScheduleRepository doctorScheduleRepository;
+    @Autowired
     private RoomRepository roomRepository;
     @Autowired
     private SpecialtyRepository specialtyRepository;
@@ -50,7 +52,8 @@ class AppointmentRepositoryTest {
 
     @BeforeEach
     void setUp() {
-        fixtures = new TestDataFactory(specialtyRepository, doctorRepository, roomRepository, patientRepository);
+        fixtures = new TestDataFactory(
+                specialtyRepository, doctorRepository, doctorScheduleRepository, roomRepository, patientRepository);
     }
 
     @Test
@@ -123,15 +126,58 @@ class AppointmentRepositoryTest {
         assertThat(rebooked.getId()).isNotNull().isNotEqualTo(original.getId());
     }
 
+    @Test
+    void rejectsOverlappingButNotExactAppointmentForSameDoctor() {
+        Specialty specialty = fixtures.createSpecialty();
+        Patient patient = fixtures.createPatient();
+        Doctor doctor = fixtures.createDoctor(specialty);
+        Room room1 = fixtures.createRoom();
+        Room room2 = fixtures.createRoom();
+        OffsetDateTime startsAt = futureSlot();
+
+        appointmentRepository.saveAndFlush(
+                newAppointment(patient, specialty, doctor, room1, startsAt, startsAt.plusMinutes(45)));
+
+        Appointment overlapping = newAppointment(
+                patient, specialty, doctor, room2, startsAt.plusMinutes(30), startsAt.plusMinutes(60));
+        assertThatThrownBy(() -> appointmentRepository.saveAndFlush(overlapping))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    void allowsBackToBackAppointmentsInSameRoom() {
+        Specialty specialty = fixtures.createSpecialty();
+        Patient patient = fixtures.createPatient();
+        Doctor doctorA = fixtures.createDoctor(specialty);
+        Doctor doctorB = fixtures.createDoctor(specialty);
+        Room room = fixtures.createRoom();
+        OffsetDateTime startsAt = futureSlot();
+
+        appointmentRepository.saveAndFlush(
+                newAppointment(patient, specialty, doctorA, room, startsAt, startsAt.plusMinutes(45)));
+        Appointment backToBack = newAppointment(
+                patient, specialty, doctorB, room, startsAt.plusMinutes(45), startsAt.plusMinutes(75));
+
+        Appointment saved = appointmentRepository.saveAndFlush(backToBack);
+
+        assertThat(saved.getId()).isNotNull();
+    }
+
     private static Appointment newAppointment(
             Patient patient, Specialty specialty, Doctor doctor, Room room, OffsetDateTime startsAt) {
+        return newAppointment(patient, specialty, doctor, room, startsAt, startsAt.plus(Duration.ofMinutes(30)));
+    }
+
+    private static Appointment newAppointment(
+            Patient patient, Specialty specialty, Doctor doctor, Room room,
+            OffsetDateTime startsAt, OffsetDateTime endsAt) {
         Appointment appointment = new Appointment();
         appointment.setPatient(patient);
         appointment.setSpecialty(specialty);
         appointment.setDoctor(doctor);
         appointment.setRoom(room);
         appointment.setStartsAt(startsAt);
-        appointment.setEndsAt(startsAt.plus(Duration.ofMinutes(30)));
+        appointment.setEndsAt(endsAt);
         return appointment;
     }
 

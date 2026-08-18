@@ -10,7 +10,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.time.Duration;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.UUID;
@@ -60,7 +62,7 @@ class AppointmentControllerTest {
     @Test
     void createReturns201WithBookedAppointmentDetails() throws Exception {
         Appointment appointment = sampleAppointment();
-        when(bookingService.book(anyString(), anyString(), any(OffsetDateTime.class))).thenReturn(appointment);
+        when(bookingService.book(anyString(), anyString(), any(OffsetDateTime.class), any())).thenReturn(appointment);
 
         mockMvc.perform(post("/api/appointments")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -75,8 +77,8 @@ class AppointmentControllerTest {
     @Test
     void createReturns400WhenPatientIdMissing() throws Exception {
         String invalidBody = """
-                {"specialtyCode":"CARDIOLOGY","startsAt":"%s"}
-                """.formatted(futureSlot());
+                {"specialtyCode":"CARDIOLOGY","date":"%s","startTime":"09:00:00","offset":"+00:00"}
+                """.formatted(futureSlot().toLocalDate());
 
         mockMvc.perform(post("/api/appointments")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -87,7 +89,7 @@ class AppointmentControllerTest {
 
     @Test
     void createReturns409WhenNoDoctorOrRoomAvailable() throws Exception {
-        when(bookingService.book(anyString(), anyString(), any(OffsetDateTime.class)))
+        when(bookingService.book(anyString(), anyString(), any(OffsetDateTime.class), any()))
                 .thenThrow(new AppointmentAllocationException("No available doctor/room"));
 
         mockMvc.perform(post("/api/appointments")
@@ -98,7 +100,7 @@ class AppointmentControllerTest {
 
     @Test
     void createReturns400WhenSpecialtyUnknown() throws Exception {
-        when(bookingService.book(anyString(), anyString(), any(OffsetDateTime.class)))
+        when(bookingService.book(anyString(), anyString(), any(OffsetDateTime.class), any()))
                 .thenThrow(new SlotValidationException("Unknown specialty code: NOPE"));
 
         mockMvc.perform(post("/api/appointments")
@@ -109,13 +111,30 @@ class AppointmentControllerTest {
 
     @Test
     void createReturns404WhenPatientIdUnknown() throws Exception {
-        when(bookingService.book(anyString(), anyString(), any(OffsetDateTime.class)))
+        when(bookingService.book(anyString(), anyString(), any(OffsetDateTime.class), any()))
                 .thenThrow(new PatientNotFoundException("Unknown patientId: NOPE"));
 
         mockMvc.perform(post("/api/appointments")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(sampleRequest())))
                 .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void createRoutesToBookOnDayWhenStartTimeOmitted() throws Exception {
+        Appointment appointment = sampleAppointment();
+        LocalDate date = futureSlot().toLocalDate();
+        when(bookingService.bookOnDay(anyString(), anyString(), any(LocalDate.class), any(ZoneOffset.class), any()))
+                .thenReturn(appointment);
+        String body = """
+                {"patientId":"PAT-0001","specialtyCode":"CARDIOLOGY","date":"%s","offset":"+00:00"}
+                """.formatted(date);
+
+        mockMvc.perform(post("/api/appointments")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.doctorName").value("Dr. Ana Ferreira"));
     }
 
     @Test
@@ -161,7 +180,9 @@ class AppointmentControllerTest {
     }
 
     private static CreateAppointmentRequest sampleRequest() {
-        return new CreateAppointmentRequest("PAT-0001", "CARDIOLOGY", futureSlot());
+        OffsetDateTime startsAt = futureSlot();
+        return new CreateAppointmentRequest(
+                "PAT-0001", "CARDIOLOGY", startsAt.toLocalDate(), startsAt.toLocalTime(), startsAt.getOffset(), null);
     }
 
     private static Appointment sampleAppointment() {

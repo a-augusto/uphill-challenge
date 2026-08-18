@@ -14,12 +14,42 @@ import com.uphill.appointments.entity.Appointment;
 public interface AppointmentRepository extends JpaRepository<Appointment, UUID>, JpaSpecificationExecutor<Appointment> {
 
     @Query("""
-            select a.doctor.id from Appointment a where a.startsAt = :startsAt and a.doctor.id in :doctorIds
+            select a.doctor.id from Appointment a
+            where a.status = com.uphill.appointments.entity.AppointmentStatus.BOOKED
+              and a.doctor.id in :doctorIds
+              and a.startsAt < :endsAt and a.endsAt > :startsAt
             """)
-    List<Long> findBookedDoctorIdsAtSlot(@Param("startsAt") OffsetDateTime startsAt, @Param("doctorIds") List<Long> doctorIds);
+    List<Long> findBookedDoctorIdsOverlapping(
+            @Param("startsAt") OffsetDateTime startsAt, @Param("endsAt") OffsetDateTime endsAt,
+            @Param("doctorIds") List<Long> doctorIds);
 
     @Query("""
-            select a.room.id from Appointment a where a.startsAt = :startsAt and a.room.id in :roomIds
+            select a.room.id from Appointment a
+            where a.status = com.uphill.appointments.entity.AppointmentStatus.BOOKED
+              and a.room.id in :roomIds
+              and a.startsAt < :endsAt and a.endsAt > :startsAt
             """)
-    List<Long> findBookedRoomIdsAtSlot(@Param("startsAt") OffsetDateTime startsAt, @Param("roomIds") List<Long> roomIds);
+    List<Long> findBookedRoomIdsOverlapping(
+            @Param("startsAt") OffsetDateTime startsAt, @Param("endsAt") OffsetDateTime endsAt,
+            @Param("roomIds") List<Long> roomIds);
+
+    @Query("""
+            select a from Appointment a
+            where a.status = com.uphill.appointments.entity.AppointmentStatus.BOOKED
+              and a.doctor.id in :doctorIds
+              and a.startsAt < :rangeEnd and a.endsAt > :rangeStart
+            """)
+    List<Appointment> findBookedAppointmentsForDoctorsOverlapping(
+            @Param("doctorIds") List<Long> doctorIds,
+            @Param("rangeStart") OffsetDateTime rangeStart, @Param("rangeEnd") OffsetDateTime rangeEnd);
+
+    @Query("""
+            select a from Appointment a
+            where a.status = com.uphill.appointments.entity.AppointmentStatus.BOOKED
+              and a.room.id in :roomIds
+              and a.startsAt < :rangeEnd and a.endsAt > :rangeStart
+            """)
+    List<Appointment> findBookedAppointmentsForRoomsOverlapping(
+            @Param("roomIds") List<Long> roomIds,
+            @Param("rangeStart") OffsetDateTime rangeStart, @Param("rangeEnd") OffsetDateTime rangeEnd);
 }

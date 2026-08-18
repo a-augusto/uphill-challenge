@@ -26,6 +26,7 @@ import com.uphill.appointments.boundary.api.dto.CreateAppointmentRequest;
 import com.uphill.appointments.entity.Patient;
 import com.uphill.appointments.entity.Specialty;
 import com.uphill.appointments.entity.repository.DoctorRepository;
+import com.uphill.appointments.entity.repository.DoctorScheduleRepository;
 import com.uphill.appointments.entity.repository.PatientRepository;
 import com.uphill.appointments.entity.repository.RoomRepository;
 import com.uphill.appointments.entity.repository.SpecialtyRepository;
@@ -54,6 +55,8 @@ class BookingConcurrencyIT {
     @Autowired
     private DoctorRepository doctorRepository;
     @Autowired
+    private DoctorScheduleRepository doctorScheduleRepository;
+    @Autowired
     private RoomRepository roomRepository;
     @Autowired
     private PatientRepository patientRepository;
@@ -62,7 +65,8 @@ class BookingConcurrencyIT {
 
     @BeforeEach
     void setUp() {
-        fixtures = new TestDataFactory(specialtyRepository, doctorRepository, roomRepository, patientRepository);
+        fixtures = new TestDataFactory(
+                specialtyRepository, doctorRepository, doctorScheduleRepository, roomRepository, patientRepository);
     }
 
     @Test
@@ -88,8 +92,9 @@ class BookingConcurrencyIT {
             tasks.add(() -> {
                 ready.countDown();
                 start.await();
-                CreateAppointmentRequest request =
-                        new CreateAppointmentRequest(patient.getPatientId(), specialty.getCode(), startsAt);
+                CreateAppointmentRequest request = new CreateAppointmentRequest(
+                        patient.getPatientId(), specialty.getCode(), startsAt.toLocalDate(),
+                        startsAt.toLocalTime(), startsAt.getOffset(), null);
                 return restTemplate.postForEntity("/api/appointments", request, String.class).getStatusCode();
             });
         }

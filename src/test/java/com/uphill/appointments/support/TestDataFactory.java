@@ -1,14 +1,18 @@
 package com.uphill.appointments.support;
 
+import java.time.DayOfWeek;
 import java.time.LocalDate;
+import java.time.LocalTime;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import com.uphill.appointments.entity.Doctor;
+import com.uphill.appointments.entity.DoctorSchedule;
 import com.uphill.appointments.entity.Gender;
 import com.uphill.appointments.entity.Patient;
 import com.uphill.appointments.entity.Room;
 import com.uphill.appointments.entity.Specialty;
 import com.uphill.appointments.entity.repository.DoctorRepository;
+import com.uphill.appointments.entity.repository.DoctorScheduleRepository;
 import com.uphill.appointments.entity.repository.PatientRepository;
 import com.uphill.appointments.entity.repository.RoomRepository;
 import com.uphill.appointments.entity.repository.SpecialtyRepository;
@@ -24,14 +28,17 @@ public class TestDataFactory {
 
     private final SpecialtyRepository specialtyRepository;
     private final DoctorRepository doctorRepository;
+    private final DoctorScheduleRepository doctorScheduleRepository;
     private final RoomRepository roomRepository;
     private final PatientRepository patientRepository;
 
     public TestDataFactory(
             SpecialtyRepository specialtyRepository, DoctorRepository doctorRepository,
-            RoomRepository roomRepository, PatientRepository patientRepository) {
+            DoctorScheduleRepository doctorScheduleRepository, RoomRepository roomRepository,
+            PatientRepository patientRepository) {
         this.specialtyRepository = specialtyRepository;
         this.doctorRepository = doctorRepository;
+        this.doctorScheduleRepository = doctorScheduleRepository;
         this.roomRepository = roomRepository;
         this.patientRepository = patientRepository;
     }
@@ -49,7 +56,18 @@ public class TestDataFactory {
         doctor.setName("Dr. Test " + COUNTER.incrementAndGet());
         doctor.setSpecialty(specialty);
         doctor.setActive(true);
-        return doctorRepository.save(doctor);
+        Doctor saved = doctorRepository.save(doctor);
+        // Permissive full-week schedule so tests unrelated to doctor working
+        // hours aren't affected by this gating dimension existing at all.
+        for (DayOfWeek day : DayOfWeek.values()) {
+            DoctorSchedule schedule = new DoctorSchedule();
+            schedule.setDoctor(saved);
+            schedule.setDayOfWeek(day);
+            schedule.setStartTime(LocalTime.of(0, 0));
+            schedule.setEndTime(LocalTime.of(23, 59));
+            doctorScheduleRepository.save(schedule);
+        }
+        return saved;
     }
 
     public Room createRoom() {

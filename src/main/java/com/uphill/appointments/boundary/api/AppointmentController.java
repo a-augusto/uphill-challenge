@@ -38,10 +38,20 @@ public class AppointmentController {
     private final CancellationService cancellationService;
     private final AppointmentRepository appointmentRepository;
 
-    @Operation(summary = "Book an appointment, auto-assigning an available doctor and room")
+    @Operation(summary = "Book an appointment, auto-assigning an available doctor, room, and (if startTime is "
+            + "omitted) a time within extended business hours")
     @PostMapping("/api/appointments")
     public ResponseEntity<AppointmentResponse> create(@Valid @RequestBody CreateAppointmentRequest request) {
-        Appointment appointment = bookingService.book(request.specialtyCode(), request.patientId(), request.startsAt());
+        Appointment appointment;
+        if (request.startTime() != null) {
+            OffsetDateTime startsAt = OffsetDateTime.of(request.date(), request.startTime(), request.offset());
+            appointment = bookingService.book(
+                    request.specialtyCode(), request.patientId(), startsAt, request.durationMinutes());
+        } else {
+            appointment = bookingService.bookOnDay(
+                    request.specialtyCode(), request.patientId(), request.date(), request.offset(),
+                    request.durationMinutes());
+        }
         return ResponseEntity.status(HttpStatus.CREATED).body(AppointmentResponse.from(appointment));
     }
 

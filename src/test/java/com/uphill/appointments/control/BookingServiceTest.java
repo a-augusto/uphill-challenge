@@ -6,7 +6,11 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
 import java.time.Duration;
+import java.time.LocalDate;
+import java.time.LocalTime;
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Optional;
 
@@ -19,11 +23,13 @@ import org.springframework.dao.DataIntegrityViolationException;
 
 import com.uphill.appointments.entity.Appointment;
 import com.uphill.appointments.entity.Doctor;
+import com.uphill.appointments.entity.DoctorSchedule;
 import com.uphill.appointments.entity.Patient;
 import com.uphill.appointments.entity.Room;
 import com.uphill.appointments.entity.Specialty;
 import com.uphill.appointments.entity.repository.AppointmentRepository;
 import com.uphill.appointments.entity.repository.DoctorRepository;
+import com.uphill.appointments.entity.repository.DoctorScheduleRepository;
 import com.uphill.appointments.entity.repository.PatientRepository;
 import com.uphill.appointments.entity.repository.SpecialtyRepository;
 
@@ -34,6 +40,8 @@ class BookingServiceTest {
     private SpecialtyRepository specialtyRepository;
     @Mock
     private DoctorRepository doctorRepository;
+    @Mock
+    private DoctorScheduleRepository doctorScheduleRepository;
     @Mock
     private RoomAvailabilityService roomAvailabilityService;
     @Mock
@@ -56,8 +64,8 @@ class BookingServiceTest {
     @BeforeEach
     void setUp() {
         bookingService = new BookingService(
-                specialtyRepository, doctorRepository, roomAvailabilityService, patientRepository,
-                appointmentRepository, bookingAttemptExecutor);
+                specialtyRepository, doctorRepository, doctorScheduleRepository, roomAvailabilityService,
+                patientRepository, appointmentRepository, bookingAttemptExecutor);
 
         cardiology = new Specialty();
         cardiology.setId(1L);
@@ -87,7 +95,16 @@ class BookingServiceTest {
         patient.setName("Jane Doe");
         patient.setEmail("jane@example.com");
 
-        startsAt = OffsetDateTime.now().plus(Duration.ofDays(1)).truncatedTo(java.time.temporal.ChronoUnit.HOURS);
+        startsAt = OffsetDateTime.now().plus(Duration.ofDays(1)).truncatedTo(ChronoUnit.HOURS);
+    }
+
+    private DoctorSchedule fullDaySchedule(Doctor doctor) {
+        DoctorSchedule schedule = new DoctorSchedule();
+        schedule.setDoctor(doctor);
+        schedule.setDayOfWeek(startsAt.getDayOfWeek());
+        schedule.setStartTime(LocalTime.of(0, 0));
+        schedule.setEndTime(LocalTime.of(23, 59));
+        return schedule;
     }
 
     @Test
@@ -95,9 +112,10 @@ class BookingServiceTest {
         when(specialtyRepository.findByCode("CARDIOLOGY")).thenReturn(Optional.of(cardiology));
         when(patientRepository.findByPatientId("PAT-0001")).thenReturn(Optional.of(patient));
         when(doctorRepository.findBySpecialtyAndActiveTrue(cardiology)).thenReturn(List.of(drA));
+        when(doctorScheduleRepository.findByDoctorIdInAndDayOfWeek(any(), any())).thenReturn(List.of(fullDaySchedule(drA)));
         when(roomAvailabilityService.availableRoomsOn(any())).thenReturn(List.of(room1));
-        when(appointmentRepository.findBookedDoctorIdsAtSlot(any(), any())).thenReturn(List.of());
-        when(appointmentRepository.findBookedRoomIdsAtSlot(any(), any())).thenReturn(List.of());
+        when(appointmentRepository.findBookedDoctorIdsOverlapping(any(), any(), any())).thenReturn(List.of());
+        when(appointmentRepository.findBookedRoomIdsOverlapping(any(), any(), any())).thenReturn(List.of());
         when(bookingAttemptExecutor.attemptBook(any(), any(), any(), any(), any(), any()))
                 .thenAnswer(inv -> {
                     Appointment appointment = new Appointment();
@@ -106,7 +124,7 @@ class BookingServiceTest {
                     return appointment;
                 });
 
-        Appointment result = bookingService.book("CARDIOLOGY", "PAT-0001", startsAt);
+        Appointment result = bookingService.book("CARDIOLOGY", "PAT-0001", startsAt, null);
 
         assertThat(result.getDoctor()).isEqualTo(drA);
         assertThat(result.getRoom()).isEqualTo(room1);
@@ -117,9 +135,11 @@ class BookingServiceTest {
         when(specialtyRepository.findByCode("CARDIOLOGY")).thenReturn(Optional.of(cardiology));
         when(patientRepository.findByPatientId("PAT-0001")).thenReturn(Optional.of(patient));
         when(doctorRepository.findBySpecialtyAndActiveTrue(cardiology)).thenReturn(List.of(drA, drB));
+        when(doctorScheduleRepository.findByDoctorIdInAndDayOfWeek(any(), any()))
+                .thenReturn(List.of(fullDaySchedule(drA), fullDaySchedule(drB)));
         when(roomAvailabilityService.availableRoomsOn(any())).thenReturn(List.of(room1, room2));
-        when(appointmentRepository.findBookedDoctorIdsAtSlot(any(), any())).thenReturn(List.of());
-        when(appointmentRepository.findBookedRoomIdsAtSlot(any(), any())).thenReturn(List.of());
+        when(appointmentRepository.findBookedDoctorIdsOverlapping(any(), any(), any())).thenReturn(List.of());
+        when(appointmentRepository.findBookedRoomIdsOverlapping(any(), any(), any())).thenReturn(List.of());
         when(bookingAttemptExecutor.attemptBook(any(), any(), any(), any(), any(), any()))
                 .thenThrow(new DataIntegrityViolationException("unique violation"))
                 .thenAnswer(inv -> {
@@ -129,7 +149,7 @@ class BookingServiceTest {
                     return appointment;
                 });
 
-        Appointment result = bookingService.book("CARDIOLOGY", "PAT-0001", startsAt);
+        Appointment result = bookingService.book("CARDIOLOGY", "PAT-0001", startsAt, null);
 
         assertThat(result).isNotNull();
     }
@@ -139,9 +159,11 @@ class BookingServiceTest {
         when(specialtyRepository.findByCode("CARDIOLOGY")).thenReturn(Optional.of(cardiology));
         when(patientRepository.findByPatientId("PAT-0001")).thenReturn(Optional.of(patient));
         when(doctorRepository.findBySpecialtyAndActiveTrue(cardiology)).thenReturn(List.of(drA, drB));
+        when(doctorScheduleRepository.findByDoctorIdInAndDayOfWeek(any(), any()))
+                .thenReturn(List.of(fullDaySchedule(drA), fullDaySchedule(drB)));
         when(roomAvailabilityService.availableRoomsOn(any())).thenReturn(List.of(room1, room2));
-        when(appointmentRepository.findBookedDoctorIdsAtSlot(any(), any())).thenReturn(List.of());
-        when(appointmentRepository.findBookedRoomIdsAtSlot(any(), any())).thenReturn(List.of());
+        when(appointmentRepository.findBookedDoctorIdsOverlapping(any(), any(), any())).thenReturn(List.of());
+        when(appointmentRepository.findBookedRoomIdsOverlapping(any(), any(), any())).thenReturn(List.of());
         when(bookingAttemptExecutor.attemptBook(any(), any(), any(), any(), any(), any()))
                 .thenThrow(new RoomReservationFailedException("room rejected", new RuntimeException()))
                 .thenAnswer(inv -> {
@@ -151,7 +173,7 @@ class BookingServiceTest {
                     return appointment;
                 });
 
-        Appointment result = bookingService.book("CARDIOLOGY", "PAT-0001", startsAt);
+        Appointment result = bookingService.book("CARDIOLOGY", "PAT-0001", startsAt, null);
 
         assertThat(result).isNotNull();
     }
@@ -161,13 +183,14 @@ class BookingServiceTest {
         when(specialtyRepository.findByCode("CARDIOLOGY")).thenReturn(Optional.of(cardiology));
         when(patientRepository.findByPatientId("PAT-0001")).thenReturn(Optional.of(patient));
         when(doctorRepository.findBySpecialtyAndActiveTrue(cardiology)).thenReturn(List.of(drA));
+        when(doctorScheduleRepository.findByDoctorIdInAndDayOfWeek(any(), any())).thenReturn(List.of(fullDaySchedule(drA)));
         when(roomAvailabilityService.availableRoomsOn(any())).thenReturn(List.of(room1));
-        when(appointmentRepository.findBookedDoctorIdsAtSlot(any(), any())).thenReturn(List.of());
-        when(appointmentRepository.findBookedRoomIdsAtSlot(any(), any())).thenReturn(List.of());
+        when(appointmentRepository.findBookedDoctorIdsOverlapping(any(), any(), any())).thenReturn(List.of());
+        when(appointmentRepository.findBookedRoomIdsOverlapping(any(), any(), any())).thenReturn(List.of());
         when(bookingAttemptExecutor.attemptBook(any(), any(), any(), any(), any(), any()))
                 .thenThrow(new RoomReservationFailedException("room rejected", new RuntimeException()));
 
-        assertThatThrownBy(() -> bookingService.book("CARDIOLOGY", "PAT-0001", startsAt))
+        assertThatThrownBy(() -> bookingService.book("CARDIOLOGY", "PAT-0001", startsAt, null))
                 .isInstanceOf(AppointmentAllocationException.class);
     }
 
@@ -176,13 +199,14 @@ class BookingServiceTest {
         when(specialtyRepository.findByCode("CARDIOLOGY")).thenReturn(Optional.of(cardiology));
         when(patientRepository.findByPatientId("PAT-0001")).thenReturn(Optional.of(patient));
         when(doctorRepository.findBySpecialtyAndActiveTrue(cardiology)).thenReturn(List.of(drA));
+        when(doctorScheduleRepository.findByDoctorIdInAndDayOfWeek(any(), any())).thenReturn(List.of(fullDaySchedule(drA)));
         when(roomAvailabilityService.availableRoomsOn(any())).thenReturn(List.of(room1));
-        when(appointmentRepository.findBookedDoctorIdsAtSlot(any(), any())).thenReturn(List.of());
-        when(appointmentRepository.findBookedRoomIdsAtSlot(any(), any())).thenReturn(List.of());
+        when(appointmentRepository.findBookedDoctorIdsOverlapping(any(), any(), any())).thenReturn(List.of());
+        when(appointmentRepository.findBookedRoomIdsOverlapping(any(), any(), any())).thenReturn(List.of());
         when(bookingAttemptExecutor.attemptBook(any(), any(), any(), any(), any(), any()))
                 .thenThrow(new DataIntegrityViolationException("unique violation"));
 
-        assertThatThrownBy(() -> bookingService.book("CARDIOLOGY", "PAT-0001", startsAt))
+        assertThatThrownBy(() -> bookingService.book("CARDIOLOGY", "PAT-0001", startsAt, null))
                 .isInstanceOf(AppointmentAllocationException.class);
     }
 
@@ -191,19 +215,75 @@ class BookingServiceTest {
         when(specialtyRepository.findByCode("CARDIOLOGY")).thenReturn(Optional.of(cardiology));
         when(patientRepository.findByPatientId("PAT-0001")).thenReturn(Optional.of(patient));
         when(doctorRepository.findBySpecialtyAndActiveTrue(cardiology)).thenReturn(List.of(drA));
-        when(appointmentRepository.findBookedDoctorIdsAtSlot(any(), any())).thenReturn(List.of());
+        when(doctorScheduleRepository.findByDoctorIdInAndDayOfWeek(any(), any())).thenReturn(List.of(fullDaySchedule(drA)));
+        when(appointmentRepository.findBookedDoctorIdsOverlapping(any(), any(), any())).thenReturn(List.of());
         when(roomAvailabilityService.availableRoomsOn(any()))
                 .thenThrow(new RoomAvailabilityCheckFailedException("external system down", new RuntimeException()));
 
-        assertThatThrownBy(() -> bookingService.book("CARDIOLOGY", "PAT-0001", startsAt))
+        assertThatThrownBy(() -> bookingService.book("CARDIOLOGY", "PAT-0001", startsAt, null))
                 .isInstanceOf(AppointmentAllocationException.class);
+    }
+
+    @Test
+    void doctorExcludedWhenNoScheduleForThatDayOfWeek() {
+        when(specialtyRepository.findByCode("CARDIOLOGY")).thenReturn(Optional.of(cardiology));
+        when(patientRepository.findByPatientId("PAT-0001")).thenReturn(Optional.of(patient));
+        when(doctorRepository.findBySpecialtyAndActiveTrue(cardiology)).thenReturn(List.of(drA));
+        when(doctorScheduleRepository.findByDoctorIdInAndDayOfWeek(any(), any())).thenReturn(List.of());
+        when(appointmentRepository.findBookedDoctorIdsOverlapping(any(), any(), any())).thenReturn(List.of());
+        when(roomAvailabilityService.availableRoomsOn(any())).thenReturn(List.of(room1));
+        when(appointmentRepository.findBookedRoomIdsOverlapping(any(), any(), any())).thenReturn(List.of());
+
+        assertThatThrownBy(() -> bookingService.book("CARDIOLOGY", "PAT-0001", startsAt, null))
+                .isInstanceOf(AppointmentAllocationException.class);
+    }
+
+    @Test
+    void doctorExcludedWhenRequestedRangeExtendsPastScheduleEndTime() {
+        when(specialtyRepository.findByCode("CARDIOLOGY")).thenReturn(Optional.of(cardiology));
+        when(patientRepository.findByPatientId("PAT-0001")).thenReturn(Optional.of(patient));
+        when(doctorRepository.findBySpecialtyAndActiveTrue(cardiology)).thenReturn(List.of(drA));
+        DoctorSchedule tooNarrow = fullDaySchedule(drA);
+        tooNarrow.setStartTime(LocalTime.of(9, 0));
+        tooNarrow.setEndTime(startsAt.toLocalTime().plusMinutes(15));
+        when(doctorScheduleRepository.findByDoctorIdInAndDayOfWeek(any(), any())).thenReturn(List.of(tooNarrow));
+        when(appointmentRepository.findBookedDoctorIdsOverlapping(any(), any(), any())).thenReturn(List.of());
+        when(roomAvailabilityService.availableRoomsOn(any())).thenReturn(List.of(room1));
+        when(appointmentRepository.findBookedRoomIdsOverlapping(any(), any(), any())).thenReturn(List.of());
+
+        assertThatThrownBy(() -> bookingService.book("CARDIOLOGY", "PAT-0001", startsAt, 30))
+                .isInstanceOf(AppointmentAllocationException.class);
+    }
+
+    @Test
+    void defaultsToThirtyMinuteDurationWhenNotSpecified() {
+        when(specialtyRepository.findByCode("CARDIOLOGY")).thenReturn(Optional.of(cardiology));
+        when(patientRepository.findByPatientId("PAT-0001")).thenReturn(Optional.of(patient));
+        when(doctorRepository.findBySpecialtyAndActiveTrue(cardiology)).thenReturn(List.of(drA));
+        when(doctorScheduleRepository.findByDoctorIdInAndDayOfWeek(any(), any())).thenReturn(List.of(fullDaySchedule(drA)));
+        when(roomAvailabilityService.availableRoomsOn(any())).thenReturn(List.of(room1));
+        when(appointmentRepository.findBookedDoctorIdsOverlapping(any(), any(), any())).thenReturn(List.of());
+        when(appointmentRepository.findBookedRoomIdsOverlapping(any(), any(), any())).thenReturn(List.of());
+        when(bookingAttemptExecutor.attemptBook(any(), any(), any(), any(), any(), any()))
+                .thenAnswer(inv -> {
+                    Appointment appointment = new Appointment();
+                    appointment.setDoctor(inv.getArgument(0));
+                    appointment.setRoom(inv.getArgument(1));
+                    appointment.setStartsAt(inv.getArgument(4));
+                    appointment.setEndsAt(inv.getArgument(5));
+                    return appointment;
+                });
+
+        Appointment result = bookingService.book("CARDIOLOGY", "PAT-0001", startsAt, null);
+
+        assertThat(Duration.between(result.getStartsAt(), result.getEndsAt())).isEqualTo(Duration.ofMinutes(30));
     }
 
     @Test
     void throwsSlotValidationExceptionWhenSpecialtyUnknown() {
         when(specialtyRepository.findByCode("UNKNOWN")).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> bookingService.book("UNKNOWN", "PAT-0001", startsAt))
+        assertThatThrownBy(() -> bookingService.book("UNKNOWN", "PAT-0001", startsAt, null))
                 .isInstanceOf(SlotValidationException.class);
     }
 
@@ -212,7 +292,26 @@ class BookingServiceTest {
         when(specialtyRepository.findByCode("CARDIOLOGY")).thenReturn(Optional.of(cardiology));
         when(patientRepository.findByPatientId("PAT-0001")).thenReturn(Optional.of(patient));
 
-        assertThatThrownBy(() -> bookingService.book("CARDIOLOGY", "PAT-0001", OffsetDateTime.now().minusSeconds(3600)))
+        assertThatThrownBy(() -> bookingService.book(
+                "CARDIOLOGY", "PAT-0001", OffsetDateTime.now().minusSeconds(3600), null))
+                .isInstanceOf(SlotValidationException.class);
+    }
+
+    @Test
+    void throwsSlotValidationExceptionWhenDurationNotMultipleOfFifteen() {
+        when(specialtyRepository.findByCode("CARDIOLOGY")).thenReturn(Optional.of(cardiology));
+        when(patientRepository.findByPatientId("PAT-0001")).thenReturn(Optional.of(patient));
+
+        assertThatThrownBy(() -> bookingService.book("CARDIOLOGY", "PAT-0001", startsAt, 20))
+                .isInstanceOf(SlotValidationException.class);
+    }
+
+    @Test
+    void throwsSlotValidationExceptionWhenDurationExceedsEightHours() {
+        when(specialtyRepository.findByCode("CARDIOLOGY")).thenReturn(Optional.of(cardiology));
+        when(patientRepository.findByPatientId("PAT-0001")).thenReturn(Optional.of(patient));
+
+        assertThatThrownBy(() -> bookingService.book("CARDIOLOGY", "PAT-0001", startsAt, 495))
                 .isInstanceOf(SlotValidationException.class);
     }
 
@@ -221,7 +320,153 @@ class BookingServiceTest {
         when(specialtyRepository.findByCode("CARDIOLOGY")).thenReturn(Optional.of(cardiology));
         when(patientRepository.findByPatientId("UNKNOWN")).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> bookingService.book("CARDIOLOGY", "UNKNOWN", startsAt))
+        assertThatThrownBy(() -> bookingService.book("CARDIOLOGY", "UNKNOWN", startsAt, null))
                 .isInstanceOf(PatientNotFoundException.class);
+    }
+
+    // --- bookOnDay (Stage 2: day-only search) ---
+
+    private LocalDate futureDate() {
+        return LocalDate.now().plusDays(7);
+    }
+
+    private DoctorSchedule scheduleFor(Doctor doctor, LocalDate date, LocalTime start, LocalTime end) {
+        DoctorSchedule schedule = new DoctorSchedule();
+        schedule.setDoctor(doctor);
+        schedule.setDayOfWeek(date.getDayOfWeek());
+        schedule.setStartTime(start);
+        schedule.setEndTime(end);
+        return schedule;
+    }
+
+    private Appointment busyAppointment(Doctor doctor, Room room, OffsetDateTime start, OffsetDateTime end) {
+        Appointment appointment = new Appointment();
+        appointment.setDoctor(doctor);
+        appointment.setRoom(room);
+        appointment.setStartsAt(start);
+        appointment.setEndsAt(end);
+        return appointment;
+    }
+
+    @Test
+    void bookOnDayFindsFirstFitWhenDoctorAndRoomFreeAllDay() {
+        LocalDate date = futureDate();
+        when(specialtyRepository.findByCode("CARDIOLOGY")).thenReturn(Optional.of(cardiology));
+        when(patientRepository.findByPatientId("PAT-0001")).thenReturn(Optional.of(patient));
+        when(doctorRepository.findBySpecialtyAndActiveTrue(cardiology)).thenReturn(List.of(drA));
+        when(doctorScheduleRepository.findByDoctorIdInAndDayOfWeek(any(), any()))
+                .thenReturn(List.of(scheduleFor(drA, date, LocalTime.of(9, 0), LocalTime.of(18, 0))));
+        when(roomAvailabilityService.availableRoomsOn(date)).thenReturn(List.of(room1));
+        when(appointmentRepository.findBookedAppointmentsForDoctorsOverlapping(any(), any(), any())).thenReturn(List.of());
+        when(appointmentRepository.findBookedAppointmentsForRoomsOverlapping(any(), any(), any())).thenReturn(List.of());
+        when(bookingAttemptExecutor.attemptBook(any(), any(), any(), any(), any(), any()))
+                .thenAnswer(inv -> {
+                    Appointment appointment = new Appointment();
+                    appointment.setDoctor(inv.getArgument(0));
+                    appointment.setRoom(inv.getArgument(1));
+                    appointment.setStartsAt(inv.getArgument(4));
+                    appointment.setEndsAt(inv.getArgument(5));
+                    return appointment;
+                });
+
+        Appointment result = bookingService.bookOnDay("CARDIOLOGY", "PAT-0001", date, ZoneOffset.UTC, 30);
+
+        assertThat(result.getStartsAt().toLocalTime()).isEqualTo(LocalTime.of(9, 0));
+        assertThat(result.getEndsAt().toLocalTime()).isEqualTo(LocalTime.of(9, 30));
+    }
+
+    @Test
+    void bookOnDaySkipsDoctorsBusyPeriodAndFindsNextGap() {
+        LocalDate date = futureDate();
+        OffsetDateTime nineAm = OffsetDateTime.of(date, LocalTime.of(9, 0), ZoneOffset.UTC);
+        OffsetDateTime noon = OffsetDateTime.of(date, LocalTime.of(12, 0), ZoneOffset.UTC);
+        when(specialtyRepository.findByCode("CARDIOLOGY")).thenReturn(Optional.of(cardiology));
+        when(patientRepository.findByPatientId("PAT-0001")).thenReturn(Optional.of(patient));
+        when(doctorRepository.findBySpecialtyAndActiveTrue(cardiology)).thenReturn(List.of(drA));
+        when(doctorScheduleRepository.findByDoctorIdInAndDayOfWeek(any(), any()))
+                .thenReturn(List.of(scheduleFor(drA, date, LocalTime.of(9, 0), LocalTime.of(18, 0))));
+        when(roomAvailabilityService.availableRoomsOn(date)).thenReturn(List.of(room1));
+        when(appointmentRepository.findBookedAppointmentsForDoctorsOverlapping(any(), any(), any()))
+                .thenReturn(List.of(busyAppointment(drA, room2, nineAm, noon)));
+        when(appointmentRepository.findBookedAppointmentsForRoomsOverlapping(any(), any(), any())).thenReturn(List.of());
+        when(bookingAttemptExecutor.attemptBook(any(), any(), any(), any(), any(), any()))
+                .thenAnswer(inv -> {
+                    Appointment appointment = new Appointment();
+                    appointment.setDoctor(inv.getArgument(0));
+                    appointment.setRoom(inv.getArgument(1));
+                    appointment.setStartsAt(inv.getArgument(4));
+                    appointment.setEndsAt(inv.getArgument(5));
+                    return appointment;
+                });
+
+        Appointment result = bookingService.bookOnDay("CARDIOLOGY", "PAT-0001", date, ZoneOffset.UTC, 30);
+
+        assertThat(result.getStartsAt().toLocalTime()).isEqualTo(LocalTime.of(12, 0));
+    }
+
+    @Test
+    void bookOnDayExcludesDoctorWhoseScheduleIsTooNarrowForDuration() {
+        LocalDate date = futureDate();
+        when(specialtyRepository.findByCode("CARDIOLOGY")).thenReturn(Optional.of(cardiology));
+        when(patientRepository.findByPatientId("PAT-0001")).thenReturn(Optional.of(patient));
+        when(doctorRepository.findBySpecialtyAndActiveTrue(cardiology)).thenReturn(List.of(drA));
+        when(doctorScheduleRepository.findByDoctorIdInAndDayOfWeek(any(), any()))
+                .thenReturn(List.of(scheduleFor(drA, date, LocalTime.of(9, 0), LocalTime.of(9, 15))));
+        when(roomAvailabilityService.availableRoomsOn(date)).thenReturn(List.of(room1));
+
+        assertThatThrownBy(() -> bookingService.bookOnDay("CARDIOLOGY", "PAT-0001", date, ZoneOffset.UTC, 30))
+                .isInstanceOf(AppointmentAllocationException.class);
+    }
+
+    @Test
+    void bookOnDayExcludesDoctorWithNoScheduleForThatDay() {
+        LocalDate date = futureDate();
+        when(specialtyRepository.findByCode("CARDIOLOGY")).thenReturn(Optional.of(cardiology));
+        when(patientRepository.findByPatientId("PAT-0001")).thenReturn(Optional.of(patient));
+        when(doctorRepository.findBySpecialtyAndActiveTrue(cardiology)).thenReturn(List.of(drA));
+        when(doctorScheduleRepository.findByDoctorIdInAndDayOfWeek(any(), any())).thenReturn(List.of());
+        when(roomAvailabilityService.availableRoomsOn(date)).thenReturn(List.of(room1));
+
+        assertThatThrownBy(() -> bookingService.bookOnDay("CARDIOLOGY", "PAT-0001", date, ZoneOffset.UTC, 30))
+                .isInstanceOf(AppointmentAllocationException.class);
+    }
+
+    @Test
+    void bookOnDayThrowsAllocationExceptionWhenFullyBookedWithinBusinessHours() {
+        LocalDate date = futureDate();
+        OffsetDateTime nineAm = OffsetDateTime.of(date, LocalTime.of(9, 0), ZoneOffset.UTC);
+        OffsetDateTime sixPm = OffsetDateTime.of(date, LocalTime.of(18, 0), ZoneOffset.UTC);
+        when(specialtyRepository.findByCode("CARDIOLOGY")).thenReturn(Optional.of(cardiology));
+        when(patientRepository.findByPatientId("PAT-0001")).thenReturn(Optional.of(patient));
+        when(doctorRepository.findBySpecialtyAndActiveTrue(cardiology)).thenReturn(List.of(drA));
+        when(doctorScheduleRepository.findByDoctorIdInAndDayOfWeek(any(), any()))
+                .thenReturn(List.of(scheduleFor(drA, date, LocalTime.of(9, 0), LocalTime.of(18, 0))));
+        when(roomAvailabilityService.availableRoomsOn(date)).thenReturn(List.of(room1));
+        when(appointmentRepository.findBookedAppointmentsForDoctorsOverlapping(any(), any(), any()))
+                .thenReturn(List.of(busyAppointment(drA, room1, nineAm, sixPm)));
+        when(appointmentRepository.findBookedAppointmentsForRoomsOverlapping(any(), any(), any())).thenReturn(List.of());
+
+        assertThatThrownBy(() -> bookingService.bookOnDay("CARDIOLOGY", "PAT-0001", date, ZoneOffset.UTC, 30))
+                .isInstanceOf(AppointmentAllocationException.class);
+    }
+
+    @Test
+    void bookOnDayThrowsSlotValidationExceptionWhenDateInThePast() {
+        when(specialtyRepository.findByCode("CARDIOLOGY")).thenReturn(Optional.of(cardiology));
+        when(patientRepository.findByPatientId("PAT-0001")).thenReturn(Optional.of(patient));
+
+        assertThatThrownBy(() -> bookingService.bookOnDay(
+                "CARDIOLOGY", "PAT-0001", LocalDate.now().minusDays(1), ZoneOffset.UTC, 30))
+                .isInstanceOf(SlotValidationException.class);
+    }
+
+    @Test
+    void bookOnDayThrowsSlotValidationExceptionWhenDurationNotMultipleOfFifteen() {
+        when(specialtyRepository.findByCode("CARDIOLOGY")).thenReturn(Optional.of(cardiology));
+        when(patientRepository.findByPatientId("PAT-0001")).thenReturn(Optional.of(patient));
+
+        assertThatThrownBy(() -> bookingService.bookOnDay(
+                "CARDIOLOGY", "PAT-0001", futureDate(), ZoneOffset.UTC, 40))
+                .isInstanceOf(SlotValidationException.class);
     }
 }

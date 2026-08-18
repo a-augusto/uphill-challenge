@@ -88,21 +88,38 @@ com.uphill.appointments
   Boundary and Entity, never does I/O directly.
 - **Entity** — domain model + persistence.
 
-**Booking flow:** `POST /api/appointments` → `BookingService` (control)
-resolves the specialty, fetches doctors free at that slot, and asks
-`RoomAvailabilityService` which rooms the external system reports available
-for that *day* before even considering them as candidates — our own DB
-isn't a sufficient source of truth for room availability on its own, since
-the external facilities system may hold rooms for reasons we have no
-visibility into (maintenance, other departments). That day-level check is a
-pre-filter, not the actual gate: it narrows candidates before the retry loop
-starts, then the existing per-slot DB check and `reserveRoom` call still do
-the real work of avoiding a race between concurrent requests. `BookingService`
-tries to persist an appointment for a candidate doctor+room pair.
-No-overbooking is enforced by a database unique constraint on
-`(doctor_id, starts_at)` and `(room_id, starts_at)` — if a concurrent request
-wins the race for a pair, the insert fails and the service just tries the
-next pair. **Room reservation is part of that same attempt**: a room must
+**Booking flow:** `POST /api/appointments` takes a `date` + `offset`, an
+optional explicit `startTime`, and an optional `durationMinutes` (defaults
+to 30; 15-minute grid and multiples, 8-hour max, can't cross midnight). With
+`startTime`, `BookingService.book` targets that exact instant. Without it,
+`BookingService.bookOnDay` searches for a free doctor+room+time within
+extended business hours (9am–6pm) instead — computing each candidate
+doctor's and room's free time windows for the day and intersecting them
+(`FreeWindowFinder`), rather than guessing individual instants; it fails
+(409) if nothing fits in that window rather than silently booking outside
+it. Both paths converge on the same candidate-list-plus-retry mechanism
+(`BookingService`'s shared `tryBookCandidates`) described below.
+
+`BookingService` (control) fetches doctors free at that range whose
+per-day-of-week `DoctorSchedule` actually covers it (a doctor with no
+schedule row for that day is off, not a candidate — doctors aren't
+bookable "any time" the way rooms are), and asks `RoomAvailabilityService`
+which rooms the external system reports available for that *day* before
+even considering them as candidates — our own DB isn't a sufficient source
+of truth for room availability on its own, since the external facilities
+system may hold rooms for reasons we have no visibility into (maintenance,
+other departments). That day-level check is a pre-filter, not the actual
+gate: it narrows candidates before the retry loop starts, then the existing
+overlap-aware DB check and `reserveRoom` call still do the real work of
+avoiding a race between concurrent requests. `BookingService` tries to
+persist an appointment for a candidate doctor+room pair. No-overbooking is
+enforced by a database range-exclusion constraint over
+`(doctor_id, [starts_at, ends_at))` and `(room_id, [starts_at, ends_at))` —
+appointments have variable duration, so two candidates can overlap without
+sharing an exact `starts_at`, which a plain unique index can't catch. If a
+concurrent request wins the race for a pair, the insert fails and the
+service just tries the next pair. **Room reservation is part of that same
+attempt**: a room must
 actually be secured for the appointment to be valid, so
 `BookingAttemptExecutor` calls the room-reservation system synchronously,
 inside the same transaction as the DB insert — a rejection rolls the attempt
@@ -126,15 +143,16 @@ sequenceDiagram
     participant Email
 
     Client->>Controller: POST /api/appointments
-    Controller->>Booking: book(specialty, patientId, startsAt)
+    Controller->>Booking: book(specialty, patientId, startsAt, duration)
+    Booking->>DB: doctors on shift & free for [startsAt, endsAt)
     Booking->>RoomAvail: availableRoomsOn(date)
     RoomAvail->>External: GET /rooms/available?date=
     External-->>RoomAvail: room ids available that day
     RoomAvail-->>Booking: active rooms ∩ externally available
-    Booking->>DB: doctors/rooms free at this exact slot
+    Booking->>DB: rooms free for [startsAt, endsAt)
     loop candidate (doctor, room) pairs, until one works
         Booking->>Executor: attemptBook(doctor, room, ...)
-        Executor->>DB: INSERT appointment (unique constraint)
+        Executor->>DB: INSERT appointment (range-exclusion constraint)
         alt lost race on DB constraint
             DB-->>Executor: constraint violation
             Executor-->>Booking: try next pair
@@ -203,14 +221,37 @@ curl -X POST http://localhost:8080/api/appointments \
   -d '{
     "patientId": "PAT-0001",
     "specialtyCode": "CARDIOLOGY",
-    "startsAt": "2026-08-20T09:30:00Z"
+    "date": "2026-08-20",
+    "startTime": "09:30:00",
+    "offset": "+00:00",
+    "durationMinutes": 45
   }'
 ```
 
 The patient must already exist — `patientId` is a business identifier, not
-the database row id, and an unknown one returns 404. `startsAt` must be in
-the future and fall on a 30-minute boundary. See **Seeding data** below for
-how to get specialties/doctors/rooms/patients into a fresh database.
+the database row id, and an unknown one returns 404. The resulting instant
+(`date` + `startTime` + `offset`) must be in the future and align to a
+15-minute grid; `durationMinutes` is optional (defaults to 30), must be a
+15-minute multiple between 15 and 480 (8 hours), and can't push the
+appointment past midnight. See **Seeding data** below for how to get
+specialties/doctors/rooms/patients into a fresh database.
+
+Omit `startTime` to let the system pick a time itself, within extended
+business hours (9am–6pm that day) — it searches for a free doctor+room+time
+rather than requiring an exact instant, and fails (409) rather than
+silently booking outside that window if nothing fits:
+
+```bash
+curl -X POST http://localhost:8080/api/appointments \
+  -H "Content-Type: application/json" \
+  -d '{
+    "patientId": "PAT-0001",
+    "specialtyCode": "CARDIOLOGY",
+    "date": "2026-08-20",
+    "offset": "+00:00",
+    "durationMinutes": 45
+  }'
+```
 
 ```bash
 curl "http://localhost:8080/api/appointments?specialty=CARDIOLOGY&page=0&size=20"
@@ -243,8 +284,9 @@ This activates `DevDataSeeder` (`seed/DevDataSeeder.java`), which never runs
 otherwise — default/production boot is completely unaffected. It's
 idempotent (skips entirely if any specialty already exists), and populates:
 the 4 real specialty codes (`CARDIOLOGY`, `DERMATOLOGY`, `GENERAL_PRACTICE`,
-`PEDIATRICS`), a couple of doctors per specialty, 5 rooms, and ~30 patients
-with realistic mock demographics via [DataFaker](https://www.datafaker.net/)
+`PEDIATRICS`), a couple of doctors per specialty (each with a Monday–Friday
+9am–6pm `DoctorSchedule`, weekends off), 5 rooms, and ~30 patients with
+realistic mock demographics via [DataFaker](https://www.datafaker.net/)
 (business ids `PAT-000001`, `PAT-000002`, ...). Check the app log or query
 `GET /api/appointments` after booking to find generated `patientId`s to test
 with.
@@ -289,9 +331,13 @@ reachable — point `spring.datasource.*`, `app.integrations.room-reservation.ba
   during booking is different: it gates the booking attempt itself, so a
   failure there doesn't need durable retry — the candidate pair just doesn't
   become a booking. See DECISIONS.md #018, #020.)
-- **Fixed 30-minute slot grid** — the no-overbooking constraint relies on it.
-  Variable-duration appointments would need a range-based exclusion
-  constraint instead. See DECISIONS.md #005.
+- **Appointments can't cross midnight** — a doctor's schedule is a single
+  per-day-of-week range, so a request whose computed `endsAt` falls on a
+  different calendar date than `startsAt` is rejected. See DECISIONS.md #024.
+- **Day-only "today" window-start rule has no deterministic unit test** —
+  covered by live smoke testing instead; a proper test would need a `Clock`
+  injected into `BookingService`, not introduced since nothing else needs
+  one. See DECISIONS.md #025.
 - **No patient-provisioning API** — patients only come from the `seed`
   profile's `DevDataSeeder` (see **Seeding data**) or direct DB access;
   there's no registration endpoint. Booking requires a `patientId` to

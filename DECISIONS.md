@@ -929,6 +929,68 @@ different status codes and both logged appropriately — exactly as decided.
 **Deferred, not forgotten**: structured/JSON log format for production
 (`logging.structured.format.console`, built into Spring Boot). Naturally a
 per-environment concern, and there's no dev/prod profile split in this
-codebase yet — #030 (email templating) is about to introduce one. Adding
+codebase yet — #031 (email templating) is about to introduce one. Adding
 structured logging now would mean inventing that split early for an
 unrelated feature.
+
+### 030 — Load tests with Gatling, isolated from the default build
+`pom.xml` gained a `load-test` Maven profile: Gatling dependencies
+(`gatling-charts-highcharts`, real current version `3.13.5`, confirmed
+against Maven Central rather than guessed) plus `build-helper-maven-plugin`
+(`3.6.0`) and `gatling-maven-plugin` (`4.16.3`), all inert unless
+`-Pload-test` is passed.
+
+**Why an entirely separate source root (`src/load-test/java`), not
+`src/test/java`**: Gatling simulations are plain Java classes referencing
+Gatling API types. `mvn test-compile` always compiles everything under
+`src/test/java` regardless of active profiles — Maven profiles can add or
+remove dependencies and plugin executions, but they can't make the
+compiler skip files that are already sitting in a source root it's told to
+compile. Putting simulations there would mean the *default* build fails to
+compile without Gatling on the classpath, even when nobody asked for a
+load test. `build-helper-maven-plugin`'s `add-test-source` goal only runs
+inside the `load-test` profile, so the extra source root — and the
+Gatling dependency it needs — only exist when explicitly asked for.
+Verified both ways: `./mvnw clean verify` (no flag) compiles and passes
+the full suite unchanged; `./mvnw -Pload-test test-compile` compiles the
+simulation against the real Gatling API.
+
+**`BookingLoadSimulation`** spreads requests across 10 business weekdays
+(skipping weekends — seeded doctor schedules are Mon–Fri only, per #024) ×
+5 time slots × 4 specialties, specifically so the tiny seeded capacity (2
+doctors × 5 rooms per specialty) isn't the bottleneck being measured — this
+is a throughput/latency test, not a re-test of the no-overbooking
+guarantee under contention (that's deliberately `BookingConcurrencyIT`'s
+job, at the unit/IT level, with real assertions on exact success counts).
+70/30 day-only vs explicit-time mix, each request carrying a fresh
+`Idempotency-Key`, ramping to 40 req/s — comfortable headroom over the
+spec's literal "thousands per day" (under 1 req/s sustained).
+
+**Verified the exact Gatling Java DSL method names against the current
+docs before writing code**, rather than guess from an older training
+snapshot of the API (`global().successfulRequests().percent().gte(95.0)`,
+`global().responseTime().percentile(95).lt(...)`) — the simulation compiled
+clean on the first attempt against the real dependency.
+
+**Deferred, flagged not forgotten**: a second, deliberately-contended
+simulation (many concurrent requests for the exact same narrow slot) to
+watch the range-exclusion constraint reject correctly under
+Gatling-generated load. Skipped to keep this step to one well-designed
+simulation; a natural next step if deeper load-test coverage is wanted.
+
+**Verified live, not just configured — and found a real bug in the
+simulation itself in the process**: the first run crashed mid-ramp with
+"Feeder feed-4 is now empty, stopping engine" — a plain `Iterator` feeder
+over the 30 seeded patients is consumed once, not cycled, so it ran out
+the moment the ramp exceeded 30 requests. Fixed with a hand-rolled cycling
+iterator (`i++ % PATIENTS.size()`) rather than reaching for a Gatling
+feeder-builder strategy, proportionate for a fixed 30-element list. Rerun
+after the fix: **3,300 requests, 0 failures, p95 = 46ms, p99 = 107ms, ~32
+req/s sustained** — all three assertions passed
+(`target/gatling/bookingloadsimulation-*/index.html` has the full report).
+900 of the 3,300 requests resulted in an actual booking (the rest 409'd on
+an already-taken candidate, an expected outcome given the seeded capacity,
+not a failure — the check explicitly treats 201 and 409 as equally valid
+responses). At ~32 req/s sustained with zero errors, that's roughly
+115,000 requests/hour of *headroom* against a spec asking for "thousands
+per day."

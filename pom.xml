@@ -248,4 +248,53 @@
 		</plugins>
 	</build>
 
+	<profiles>
+		<!-- Load testing (Gatling), isolated on purpose: simulations live under
+		     src/load-test/java, NOT src/test/java, so `mvn test-compile`/`verify`
+		     without this profile never needs Gatling on the classpath at all.
+		     Run with: ./mvnw gatling:test -Pload-test (app must already be running). -->
+		<profile>
+			<id>load-test</id>
+			<dependencies>
+				<dependency>
+					<groupId>io.gatling.highcharts</groupId>
+					<artifactId>gatling-charts-highcharts</artifactId>
+					<version>3.13.5</version>
+					<scope>test</scope>
+				</dependency>
+			</dependencies>
+			<build>
+				<plugins>
+					<plugin>
+						<groupId>org.codehaus.mojo</groupId>
+						<artifactId>build-helper-maven-plugin</artifactId>
+						<version>3.6.0</version>
+						<executions>
+							<execution>
+								<id>add-load-test-source</id>
+								<phase>generate-test-sources</phase>
+								<goals>
+									<goal>add-test-source</goal>
+								</goals>
+								<configuration>
+									<sources>
+										<source>src/load-test/java</source>
+									</sources>
+								</configuration>
+							</execution>
+						</executions>
+					</plugin>
+					<plugin>
+						<groupId>io.gatling</groupId>
+						<artifactId>gatling-maven-plugin</artifactId>
+						<version>4.16.3</version>
+						<configuration>
+							<simulationsFolder>src/load-test/java</simulationsFolder>
+						</configuration>
+					</plugin>
+				</plugins>
+			</build>
+		</profile>
+	</profiles>
+
 </project>

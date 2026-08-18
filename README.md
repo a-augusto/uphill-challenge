@@ -332,6 +332,28 @@ succeed as there is doctor capacity, which is the actual proof the
 no-overbooking guarantee holds under real contention rather than just in a
 single-threaded unit test.
 
+## Load testing
+
+```bash
+docker compose up -d
+./mvnw spring-boot:run -Dspring-boot.run.profiles=seed
+# in a second terminal, once the app is up:
+./mvnw gatling:test -Pload-test
+```
+
+Gatling, isolated behind a `load-test` Maven profile — `./mvnw verify`
+(no flag) never resolves the Gatling dependencies or compiles the
+simulation, since it lives under `src/load-test/java`, not `src/test/java`.
+`BookingLoadSimulation` ramps to 40 requests/sec against
+`POST /api/appointments`, spread across enough distinct specialty/date/time
+combinations that seeded capacity isn't the limiting factor — the spec's
+"thousands per day" is under 1 req/s sustained, so this is about proving
+headroom and real latency, not just hitting the number. Results (including
+an HTML report with the latency distribution) land under
+`target/gatling/`. See DECISIONS.md #030 for why it's a separate source
+root and what's deliberately out of scope (a contended-slot simulation,
+left as a follow-up).
+
 ## Building the container
 
 ```bash

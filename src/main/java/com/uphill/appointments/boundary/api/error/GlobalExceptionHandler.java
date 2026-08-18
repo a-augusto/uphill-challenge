@@ -13,6 +13,7 @@ import com.uphill.appointments.boundary.api.dto.ErrorResponse;
 import com.uphill.appointments.control.exceptions.AppointmentAllocationException;
 import com.uphill.appointments.control.exceptions.AppointmentAlreadyCancelledException;
 import com.uphill.appointments.control.exceptions.AppointmentNotFoundException;
+import com.uphill.appointments.control.exceptions.PatientDoubleBookedException;
 import com.uphill.appointments.control.exceptions.PatientNotFoundException;
 import com.uphill.appointments.control.exceptions.RoomAvailabilityCheckFailedException;
 import com.uphill.appointments.control.exceptions.SlotValidationException;
@@ -45,6 +46,11 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(AppointmentAllocationException.class)
     public ResponseEntity<ErrorResponse> handleAllocation(AppointmentAllocationException ex, WebRequest request) {
+        return build(HttpStatus.CONFLICT, ex.getMessage(), request, ex);
+    }
+
+    @ExceptionHandler(PatientDoubleBookedException.class)
+    public ResponseEntity<ErrorResponse> handlePatientDoubleBooked(PatientDoubleBookedException ex, WebRequest request) {
         return build(HttpStatus.CONFLICT, ex.getMessage(), request, ex);
     }
 

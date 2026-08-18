@@ -30,6 +30,7 @@ import com.uphill.appointments.control.exceptions.AppointmentAlreadyCancelledExc
 import com.uphill.appointments.control.exceptions.AppointmentNotFoundException;
 import com.uphill.appointments.control.BookingService;
 import com.uphill.appointments.control.CancellationService;
+import com.uphill.appointments.control.exceptions.PatientDoubleBookedException;
 import com.uphill.appointments.control.exceptions.PatientNotFoundException;
 import com.uphill.appointments.control.exceptions.SlotValidationException;
 import com.uphill.appointments.entity.Appointment;
@@ -108,7 +109,8 @@ class AdminAppointmentsController {
                     form.specialtyCode(), form.patientId(), startsAt, durationMinutes);
             redirectAttributes.addFlashAttribute("successMessage",
                     "Booked appointment " + appointment.getId() + " for " + form.patientId() + ".");
-        } catch (SlotValidationException | AppointmentAllocationException | PatientNotFoundException e) {
+        } catch (SlotValidationException | AppointmentAllocationException | PatientNotFoundException
+                | PatientDoubleBookedException e) {
             redirectAttributes.addFlashAttribute("errorMessage", e.getMessage());
         }
         return "redirect:/admin/appointments";

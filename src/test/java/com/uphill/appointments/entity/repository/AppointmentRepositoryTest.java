@@ -91,6 +91,24 @@ class AppointmentRepositoryTest {
     @Test
     void allowsDifferentDoctorAndRoomAtSameSlot() {
         Specialty specialty = fixtures.createSpecialty();
+        Patient patientA = fixtures.createPatient();
+        Patient patientB = fixtures.createPatient();
+        Doctor doctorA = fixtures.createDoctor(specialty);
+        Doctor doctorB = fixtures.createDoctor(specialty);
+        Room room1 = fixtures.createRoom();
+        Room room2 = fixtures.createRoom();
+        OffsetDateTime startsAt = futureSlot();
+
+        appointmentRepository.saveAndFlush(newAppointment(patientA, specialty, doctorA, room1, startsAt));
+        Appointment second =
+                appointmentRepository.saveAndFlush(newAppointment(patientB, specialty, doctorB, room2, startsAt));
+
+        assertThat(second.getId()).isNotNull();
+    }
+
+    @Test
+    void rejectsSecondAppointmentForSamePatientAtOverlappingSlot() {
+        Specialty specialty = fixtures.createSpecialty();
         Patient patient = fixtures.createPatient();
         Doctor doctorA = fixtures.createDoctor(specialty);
         Doctor doctorB = fixtures.createDoctor(specialty);
@@ -99,10 +117,13 @@ class AppointmentRepositoryTest {
         OffsetDateTime startsAt = futureSlot();
 
         appointmentRepository.saveAndFlush(newAppointment(patient, specialty, doctorA, room1, startsAt));
-        Appointment second =
-                appointmentRepository.saveAndFlush(newAppointment(patient, specialty, doctorB, room2, startsAt));
 
-        assertThat(second.getId()).isNotNull();
+        // Different doctor and different room — proves the rejection is keyed
+        // on the patient's own overlapping time range, not incidentally on a
+        // doctor/room clash.
+        Appointment conflicting = newAppointment(patient, specialty, doctorB, room2, startsAt);
+        assertThatThrownBy(() -> appointmentRepository.saveAndFlush(conflicting))
+                .isInstanceOf(DataIntegrityViolationException.class);
     }
 
     @Test

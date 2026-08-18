@@ -1555,3 +1555,58 @@ prefix (Mr./Ms./Dr.), so this occasionally stacked into `"Dr. Mr. Rita
 Braun"`. Switched to `"Dr. " + firstName() + " " + lastName()`, same fix
 shape as the patient one: stop asking DataFaker for a whole assembled
 identity when only the parts that can't collide are actually needed.
+
+### 043 — Closed a real business gap: a patient could double-book overlapping appointments
+
+Flagged during review: the no-overbooking guarantee only ever covered
+doctors and rooms — nothing stopped the same patient from holding two
+overlapping appointments (different specialty, different doctor, doesn't
+matter). Same class of bug as #010/#041, different actor: a constraint the
+domain clearly needs that nobody had actually written down as a
+requirement until it was spotted by inspection.
+
+**Same two-layer shape as the existing doctor/room guarantee** (#005,
+#024), because a single-layer fix would either be too weak or too eager:
+
+- **DB backstop**: `excl_patient_overlap`, a third `EXCLUDE USING gist`
+  constraint on `(patient_id, tstzrange(starts_at, ends_at))`, `WHERE
+  (status = 'BOOKED')` — identical shape to `excl_doctor_overlap`/
+  `excl_room_overlap`, added to `V3` in place (same standing pre-prod
+  permission #027 used for `doctor_schedule`'s CHECK constraint). This is
+  what actually holds under concurrency: two simultaneous requests for the
+  same patient's overlapping slots would both pass an application-level
+  check before either commits, same race the doctor/room constraints
+  exist to close.
+- **Application-level fast path**, deliberately *not* just "let the DB
+  constraint catch it and retry like any other lost race" — the two
+  booking entry points needed different treatment:
+  - `book()` (explicit instant): pre-checks
+    `existsBookedForPatientOverlapping` before even querying doctor/room
+    availability, and fails immediately with a new
+    `PatientDoubleBookedException` (409, clear message) if the patient's
+    already got something at that time. Every doctor/room candidate for an
+    explicit instant shares that same instant, so without this check the
+    retry loop would burn up to 20 attempts on a conflict no candidate
+    swap could ever fix, then surface the wrong message ("no available
+    doctor/room" for what's actually "you're already booked then").
+  - `bookOnDay()` (day search): the opposite shape — folded into
+    `dayOnlyCandidates`' existing doctor∩room free-window intersection as
+    a third `patientFree` list (`FreeWindowFinder.freeWindows` reused
+    as-is), not an upfront gate. A patient busy for part of the day can
+    still book a genuinely free slot elsewhere in it — gating the whole
+    window on any conflict would reject bookings that should succeed.
+
+**Verified live**, not just unit-tested: booked 09:30–10:15 CARDIOLOGY for
+a seeded patient, then a 09:45–10:15 DERMATOLOGY request for the *same*
+patient (different specialty, would resolve to a different doctor) came
+back 409 with the new message immediately (no wasted candidate attempts in
+the log); an 11:00 request the same day for the same patient succeeded
+normally. `AppointmentRepositoryTest` gained
+`rejectsSecondAppointmentForSamePatientAtOverlappingSlot` (different doctor
+*and* room, to prove the rejection is genuinely keyed on the patient, not
+incidental to the other two constraints); `allowsDifferentDoctorAndRoomAtSameSlot`
+had been silently relying on reusing the same patient fixture for two
+appointments at the identical slot, which the new constraint now correctly
+rejects — split into two distinct patients so the test still proves what
+its name says. `BookingServiceTest` gained matching unit coverage for both
+entry points.

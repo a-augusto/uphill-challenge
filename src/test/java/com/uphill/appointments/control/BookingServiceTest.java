@@ -3,6 +3,8 @@ package com.uphill.appointments.control;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -391,6 +393,22 @@ class BookingServiceTest {
                 .isInstanceOf(PatientNotFoundException.class);
     }
 
+    @Test
+    void throwsPatientDoubleBookedExceptionWhenPatientAlreadyHasOverlappingAppointment() {
+        when(specialtyRepository.findByCode("CARDIOLOGY")).thenReturn(Optional.of(cardiology));
+        when(patientRepository.findByPatientId("PAT-0001")).thenReturn(Optional.of(patient));
+        when(appointmentRepository.existsBookedForPatientOverlapping(eq(patient.getId()), any(), any()))
+                .thenReturn(true);
+
+        assertThatThrownBy(() -> bookingService.book("CARDIOLOGY", "PAT-0001", startsAt, null))
+                .isInstanceOf(PatientDoubleBookedException.class);
+
+        // Fails fast, before ever touching doctor/room availability — retrying with a
+        // different doctor or room can't fix a conflict that's about the patient's own
+        // schedule, not capacity.
+        verify(doctorRepository, never()).findBySpecialtyAndActiveTrue(any());
+    }
+
     // --- bookOnDay (Stage 2: day-only search) ---
 
     private LocalDate futureDate() {
@@ -485,6 +503,39 @@ class BookingServiceTest {
         when(appointmentRepository.findBookedAppointmentsForDoctorsOverlapping(any(), any(), any()))
                 .thenReturn(List.of(busyAppointment(drA, room2, nineAm, noon)));
         when(appointmentRepository.findBookedAppointmentsForRoomsOverlapping(any(), any(), any())).thenReturn(List.of());
+        when(bookingAttemptExecutor.attemptBook(any(), any(), any(), any(), any(), any()))
+                .thenAnswer(inv -> {
+                    Appointment appointment = new Appointment();
+                    appointment.setDoctor(inv.getArgument(0));
+                    appointment.setRoom(inv.getArgument(1));
+                    appointment.setStartsAt(inv.getArgument(4));
+                    appointment.setEndsAt(inv.getArgument(5));
+                    return appointment;
+                });
+
+        Appointment result = bookingService.bookOnDay("CARDIOLOGY", "PAT-0001", date, ZoneOffset.UTC, 30);
+
+        assertThat(result.getStartsAt().toLocalTime()).isEqualTo(LocalTime.of(12, 0));
+    }
+
+    @Test
+    void bookOnDaySkipsPatientsExistingAppointmentAndFindsNextGap() {
+        LocalDate date = futureDate();
+        OffsetDateTime nineAm = OffsetDateTime.of(date, LocalTime.of(9, 0), ZoneOffset.UTC);
+        OffsetDateTime noon = OffsetDateTime.of(date, LocalTime.of(12, 0), ZoneOffset.UTC);
+        when(specialtyRepository.findByCode("CARDIOLOGY")).thenReturn(Optional.of(cardiology));
+        when(patientRepository.findByPatientId("PAT-0001")).thenReturn(Optional.of(patient));
+        when(doctorRepository.findBySpecialtyAndActiveTrue(cardiology)).thenReturn(List.of(drA));
+        when(doctorScheduleRepository.findByDoctorIdInAndDayOfWeek(any(), any()))
+                .thenReturn(List.of(scheduleFor(drA, date, LocalTime.of(9, 0), LocalTime.of(18, 0))));
+        when(roomAvailabilityService.availableRoomsOn(any(OffsetDateTime.class))).thenReturn(List.of(room1));
+        when(appointmentRepository.findBookedAppointmentsForDoctorsOverlapping(any(), any(), any())).thenReturn(List.of());
+        when(appointmentRepository.findBookedAppointmentsForRoomsOverlapping(any(), any(), any())).thenReturn(List.of());
+        // Patient already has an appointment 9am-noon *elsewhere* (different doctor/room,
+        // not modeled here — the repository call is keyed on patient id alone) — the doctor
+        // and room are both free that whole window, but the patient isn't.
+        when(appointmentRepository.findBookedAppointmentsForPatientOverlapping(eq(patient.getId()), any(), any()))
+                .thenReturn(List.of(busyAppointment(drA, room1, nineAm, noon)));
         when(bookingAttemptExecutor.attemptBook(any(), any(), any(), any(), any(), any()))
                 .thenAnswer(inv -> {
                     Appointment appointment = new Appointment();

@@ -52,4 +52,24 @@ public interface AppointmentRepository extends JpaRepository<Appointment, UUID>,
     List<Appointment> findBookedAppointmentsForRoomsOverlapping(
             @Param("roomIds") List<Long> roomIds,
             @Param("rangeStart") OffsetDateTime rangeStart, @Param("rangeEnd") OffsetDateTime rangeEnd);
+
+    @Query("""
+            select count(a) > 0 from Appointment a
+            where a.status = com.uphill.appointments.entity.enums.AppointmentStatus.BOOKED
+              and a.patient.id = :patientId
+              and a.startsAt < :endsAt and a.endsAt > :startsAt
+            """)
+    boolean existsBookedForPatientOverlapping(
+            @Param("patientId") Long patientId,
+            @Param("startsAt") OffsetDateTime startsAt, @Param("endsAt") OffsetDateTime endsAt);
+
+    @Query("""
+            select a from Appointment a
+            where a.status = com.uphill.appointments.entity.enums.AppointmentStatus.BOOKED
+              and a.patient.id = :patientId
+              and a.startsAt < :rangeEnd and a.endsAt > :rangeStart
+            """)
+    List<Appointment> findBookedAppointmentsForPatientOverlapping(
+            @Param("patientId") Long patientId,
+            @Param("rangeStart") OffsetDateTime rangeStart, @Param("rangeEnd") OffsetDateTime rangeEnd);
 }

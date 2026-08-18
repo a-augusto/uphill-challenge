@@ -85,6 +85,11 @@ public class BookingService {
         if (!endsAt.toLocalDate().equals(startsAt.toLocalDate())) {
             throw new SlotValidationException("Appointments cannot cross midnight");
         }
+        if (appointmentRepository.existsBookedForPatientOverlapping(patient.getId(), startsAt, endsAt)) {
+            recordBookingFailure("patient_double_booked");
+            throw new PatientDoubleBookedException(
+                    "Patient " + patientId + " already has an appointment overlapping " + startsAt);
+        }
 
         List<Doctor> availableDoctors = availableDoctors(specialty, startsAt, endsAt);
         List<Room> availableRooms = availableRooms(startsAt, endsAt);
@@ -132,7 +137,8 @@ public class BookingService {
             throw new AppointmentAllocationException(noAvailabilityMessage);
         }
 
-        List<Candidate> candidates = dayOnlyCandidates(specialty, new Interval(windowStart, windowEnd), duration);
+        List<Candidate> candidates =
+                dayOnlyCandidates(specialty, patient, new Interval(windowStart, windowEnd), duration);
         if (candidates.isEmpty()) {
             recordBookingFailure("no_availability");
             throw new AppointmentAllocationException(noAvailabilityMessage);
@@ -168,7 +174,7 @@ public class BookingService {
         return remainder == 0 ? time : time.plusSeconds(gridSeconds - remainder);
     }
 
-    private List<Candidate> dayOnlyCandidates(Specialty specialty, Interval window, Duration duration) {
+    private List<Candidate> dayOnlyCandidates(Specialty specialty, Patient patient, Interval window, Duration duration) {
         List<Doctor> doctors = doctorRepository.findBySpecialtyAndActiveTrue(specialty);
         List<Long> doctorIds = doctors.stream().map(Doctor::getId).toList();
         DayOfWeek dayOfWeek = window.start().getDayOfWeek();
@@ -186,6 +192,17 @@ public class BookingService {
             throw new AppointmentAllocationException("Unable to determine room availability: " + e.getMessage(), e);
         }
         List<Long> roomIds = rooms.stream().map(Room::getId).toList();
+
+        // A patient can't hold two overlapping appointments, same as a doctor or
+        // room can't (see excl_patient_overlap, V3 migration) — folded into the
+        // same doctorFree/roomFree intersection below rather than gating the
+        // whole day upfront, so a patient busy for part of the day can still
+        // book a genuinely free slot elsewhere in it.
+        List<Interval> patientBusy = appointmentRepository
+                .findBookedAppointmentsForPatientOverlapping(patient.getId(), window.start(), window.end()).stream()
+                .map(a -> new Interval(a.getStartsAt(), a.getEndsAt()))
+                .toList();
+        List<Interval> patientFree = FreeWindowFinder.freeWindows(window, patientBusy);
 
         Map<Long, List<Interval>> busyByDoctor = doctorIds.isEmpty()
                 ? Map.of()
@@ -223,7 +240,8 @@ public class BookingService {
             for (Room room : shuffledRooms) {
                 List<Interval> roomFree =
                         FreeWindowFinder.freeWindows(window, busyByRoom.getOrDefault(room.getId(), List.of()));
-                FreeWindowFinder.intersect(doctorFree, roomFree).stream()
+                List<Interval> free = FreeWindowFinder.intersect(FreeWindowFinder.intersect(doctorFree, roomFree), patientFree);
+                free.stream()
                         .map(i -> new Interval(ceilToGrid(i.start()), i.end()))
                         .filter(i -> !i.start().isAfter(i.end())
                                 && Duration.between(i.start(), i.end()).compareTo(duration) >= 0)

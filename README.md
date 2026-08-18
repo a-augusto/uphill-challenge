@@ -115,10 +115,19 @@ overlap-aware DB check and `reserveRoom` call still do the real work of
 avoiding a race between concurrent requests. `BookingService` tries to
 persist an appointment for a candidate doctor+room pair. No-overbooking is
 enforced by a database range-exclusion constraint over
-`(doctor_id, [starts_at, ends_at))` and `(room_id, [starts_at, ends_at))` —
-appointments have variable duration, so two candidates can overlap without
-sharing an exact `starts_at`, which a plain unique index can't catch. If a
-concurrent request wins the race for a pair, the insert fails and the
+`(doctor_id, [starts_at, ends_at))`, `(room_id, [starts_at, ends_at))`, and
+`(patient_id, [starts_at, ends_at))` — a patient can't hold two overlapping
+appointments any more than a doctor or room can double-book a slot. All
+three are the same constraint shape for the same reason: appointments have
+variable duration, so two candidates can overlap without sharing an exact
+`starts_at`, which a plain unique index can't catch. The patient one has an
+application-level fast path in front of it too — `book()` (explicit time)
+checks it upfront and fails fast with a clear 409 rather than burning
+retries on doctor/room candidates that were never going to help; `bookOnDay()`
+folds it into the same free-window search as the doctor/room check, so a
+patient busy for *part* of the day can still land a genuinely free slot
+elsewhere in it. See DECISIONS.md #043. If a concurrent request wins the
+race for a pair, the insert fails and the
 service just tries the next pair. **Room reservation is part of that same
 attempt**: a room must
 actually be secured for the appointment to be valid, so

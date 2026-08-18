@@ -18,7 +18,11 @@ public final class AppointmentSpecifications {
     }
 
     public static Specification<Appointment> hasSpecialtyCode(String specialtyCode) {
-        if (specialtyCode == null) {
+        // Blank, not just null: an HTML <select> "All specialties" option submits
+        // specialty= (present, empty) rather than omitting the parameter - without
+        // this, that renders as an impossible "code equals ''" filter instead of
+        // no filter at all.
+        if (specialtyCode == null || specialtyCode.isBlank()) {
             return null;
         }
         return (root, query, cb) -> cb.equal(root.get("specialty").get("code"), specialtyCode);

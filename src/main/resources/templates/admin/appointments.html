@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8"/>
+    <title>Uphill Health - Admin</title>
+    <style>
+        body { margin: 0; padding: 0; background-color: #f4f6f8; font-family: Arial, Helvetica, sans-serif; color: #1f2933; }
+        .container { max-width: 960px; margin: 24px auto; padding: 0 16px; }
+        h1 { font-size: 20px; }
+        h2 { font-size: 16px; margin-top: 32px; }
+        .banner { padding: 10px 16px; border-radius: 6px; margin-bottom: 16px; font-size: 14px; }
+        .banner.success { background-color: #d1fae5; color: #065f46; }
+        .banner.error { background-color: #fee2e2; color: #991b1b; }
+        table { width: 100%; border-collapse: collapse; background-color: #ffffff; border-radius: 8px; overflow: hidden; }
+        th, td { padding: 8px 12px; border-bottom: 1px solid #e2e8f0; font-size: 14px; text-align: left; }
+        th { background-color: #f8fafc; color: #6b7280; }
+        .status-booked { color: #065f46; font-weight: bold; }
+        .status-cancelled { color: #991b1b; }
+        .banner.hint { background-color: #eff6ff; color: #1e40af; }
+        .banner code { background-color: rgba(0,0,0,0.08); padding: 1px 5px; border-radius: 3px; }
+        form.filter, form.booking { background-color: #ffffff; padding: 16px; border-radius: 8px; margin-bottom: 16px; }
+        form.booking label { display: block; font-size: 12px; color: #6b7280; margin-top: 8px; }
+        form.booking input, form.booking select { padding: 6px; width: 220px; }
+        button { padding: 6px 14px; background-color: #0f766e; color: #ffffff; border: none; border-radius: 4px; cursor: pointer; margin-top: 12px; }
+        button.cancel { background-color: #991b1b; padding: 4px 10px; font-size: 12px; margin-top: 0; }
+    </style>
+    <script src="/vendor/htmx.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <h1>Uphill Health - Appointments (admin)</h1>
+
+        <div class="banner hint" th:if="${specialties.empty}">
+            No specialties found - this database hasn't been seeded. Restart with
+            <code>-Dspring-boot.run.profiles=seed</code> (see README "Seeding data")
+            to populate demo specialties/doctors/rooms/patients.
+        </div>
+
+        <form class="filter" method="get" th:action="@{/admin/appointments}"
+              hx-get="/admin/appointments" hx-trigger="change" hx-target="#results" hx-select="#results"
+              hx-swap="outerHTML" hx-push-url="true">
+            <label for="specialty">Specialty</label>
+            <select id="specialty" name="specialty">
+                <option value="">All specialties</option>
+                <option th:each="s : ${specialties}" th:value="${s.code}" th:text="${s.name}"
+                        th:selected="${s.code == selectedSpecialty}">Specialty</option>
+            </select>
+        </form>
+
+        <!--
+        Everything hx-* touches is this one div: filter/book/cancel all
+        hx-select/hx-target it out of the exact same full-page response the
+        plain-browser (no-JS) path already returns - there is no separate
+        fragment-rendering branch on the server for this. hx-swap="outerHTML"
+        so the swapped-in copy replaces this element itself rather than
+        nesting a second #results inside it.
+        -->
+        <div id="results">
+            <div class="banner success" th:if="${successMessage}" th:text="${successMessage}">Success</div>
+            <div class="banner error" th:if="${errorMessage}" th:text="${errorMessage}">Error</div>
+
+            <table>
+                <thead>
+                <tr>
+                    <th>Patient</th>
+                    <th>Specialty</th>
+                    <th>Doctor</th>
+                    <th>Room</th>
+                    <th>Starts at</th>
+                    <th>Ends at</th>
+                    <th>Duration</th>
+                    <th>Status</th>
+                    <th></th>
+                </tr>
+                </thead>
+                <tbody>
+                <tr th:each="row : ${appointments.content}">
+                    <td th:text="${row.appointment.patientName}">Patient</td>
+                    <td th:text="${row.appointment.specialty}">Specialty</td>
+                    <td th:text="${row.appointment.doctorName}">Doctor</td>
+                    <td th:text="${row.appointment.roomName}">Room</td>
+                    <td th:text="${row.startsAtDisplay}">Starts at</td>
+                    <td th:text="${row.endsAtDisplay}">Ends at</td>
+                    <td th:text="${row.durationDisplay}">Duration</td>
+                    <td>
+                        <span th:if="${row.appointment.status == 'BOOKED'}" class="status-booked" th:text="${row.appointment.status}">BOOKED</span>
+                        <span th:unless="${row.appointment.status == 'BOOKED'}" class="status-cancelled" th:text="${row.appointment.status}">CANCELLED</span>
+                    </td>
+                    <td>
+                        <form method="post" th:if="${row.appointment.status == 'BOOKED'}"
+                              th:action="@{/admin/appointments/{id}/cancel(id=${row.appointment.id})}"
+                              th:hx-post="@{/admin/appointments/{id}/cancel(id=${row.appointment.id})}"
+                              hx-target="#results" hx-select="#results" hx-swap="outerHTML">
+                            <input type="hidden" th:if="${_csrf}" th:name="${_csrf.parameterName}" th:value="${_csrf.token}"/>
+                            <button class="cancel" type="submit">Cancel</button>
+                        </form>
+                    </td>
+                </tr>
+                <tr th:if="${appointments.empty}">
+                    <td colspan="9">No appointments match this filter.</td>
+                </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h2>Book an appointment</h2>
+        <form class="booking" method="post" th:action="@{/admin/appointments}"
+              hx-post="/admin/appointments" hx-target="#results" hx-select="#results" hx-swap="outerHTML">
+            <input type="hidden" th:if="${_csrf}" th:name="${_csrf.parameterName}" th:value="${_csrf.token}"/>
+
+            <label for="patientId">Patient ID</label>
+            <input id="patientId" name="patientId" type="text" placeholder="PAT-000001" required="required"/>
+
+            <label for="specialtyCode">Specialty</label>
+            <select id="specialtyCode" name="specialtyCode" required="required" th:disabled="${specialties.empty}">
+                <option th:each="s : ${specialties}" th:value="${s.code}" th:text="${s.name}">Specialty</option>
+            </select>
+
+            <label for="date">Date</label>
+            <input id="date" name="date" type="date" required="required"/>
+
+            <label for="startTime">Start time</label>
+            <input id="startTime" name="startTime" type="time" required="required"/>
+
+            <label for="endTime">End time</label>
+            <input id="endTime" name="endTime" type="time" required="required"/>
+
+            <div>
+                <button type="submit" th:disabled="${specialties.empty}">Book</button>
+            </div>
+        </form>
+    </div>
+</body>
+</html>

@@ -1230,3 +1230,253 @@ changing.
 room availability, Swagger UI, and actuator health all still 200/normal
 without any credentials - the rule is additive, touches nothing else. Full
 `./mvnw clean verify` green.
+
+### 036 — Server-side-rendered admin UI, alongside the JSON API
+Discussed what a visual/browser-testable layer would need without turning
+this into a second deployable: same Maven module, new `boundary.web`
+package, one `@Controller` (`AdminAppointmentsController`) calling the
+exact same `BookingService`/`CancellationService`/`AppointmentRepository`
+(+ `AppointmentSpecifications`) the REST `AppointmentController` already
+uses - in-process, no HTTP hop back into the API. `spring-boot-starter-thymeleaf`
+was already a dependency from #031's HTML emails, noted then as
+harmless-but-unused as an MVC view resolver; this is what finally uses it.
+Same `admin`/`admin` HTTP Basic credentials as #035 protect the new
+`/admin/appointments/**` routes - no separate login form/session, browsers
+cache Basic auth after the first prompt so the whole flow only asks once.
+
+**Two small, deliberate edits to existing code**, both scoped tightly so
+nothing else changes:
+- `GlobalExceptionHandler` was `@RestControllerAdvice` with no package
+  scoping - applied to *every* controller, so a web-flow booking failure
+  would have rendered raw JSON instead of the page. Scoped it to
+  `basePackages = "com.uphill.appointments.boundary.api"`; the new
+  `boundary.web` package falls outside it by construction, and handles its
+  own small set of business exceptions locally with a flash-message
+  redirect instead.
+- CSRF was disabled globally in `SecurityConfig` (correct for the
+  stateless JSON API, #035). A browser form is a real CSRF target though -
+  arguably *more* so with Basic auth than cookie sessions, since browsers
+  auto-attach cached Basic credentials to same-origin requests with zero
+  interaction. Re-enabled CSRF but exempted `/api/**` specifically
+  (`csrf.ignoringRequestMatchers("/api/**")`), so the JSON API keeps
+  exactly the model #035 chose while the new HTML forms get real
+  protection. Used `CookieCsrfTokenRepository` (double-submit cookie), not
+  Spring's session-backed default - the whole app stays
+  `SessionCreationPolicy.STATELESS`, CSRF included.
+
+**Sidestepped two form-binding gaps rather than fighting them**: HTML
+`<form>` POSTs go through Spring MVC's `WebDataBinder`/`ConversionService`,
+not Jackson - so `ZoneOffset` (no built-in Spring form converter) and an
+empty optional field bound to `LocalTime`/`Integer` (Spring's binder
+rejects `""` for non-String types outright, with no `BindingResult`
+parameter here to catch it gracefully) both would have broken. Fixed by
+not asking for an offset at all - the web UI is single-timezone by design,
+fixing `ZoneId.of("Europe/Lisbon")` (already this project's convention,
+see `EmailSlotFormatter`) and resolving the correct offset server-side for
+whatever date was picked - and by typing `startTime`/`durationMinutes` as
+plain `String` on the form-backing record, parsed by hand (blank → null,
+matching how an omitted JSON field behaves in the REST API).
+
+**Discovered while building the table that Thymeleaf's `#temporals`
+formatting utility is now built into Thymeleaf 3.1.x core** (verified by
+unzipping the actual resolved jar - `org.thymeleaf.expression.Temporals`
+is present, no separate `thymeleaf-extras-java8time` dependency needed,
+unlike older Thymeleaf versions). Didn't end up using it, though: its
+zone-conversion behavior for `OffsetDateTime` wasn't something worth
+verifying beyond reading method signatures, so the slot display string is
+pre-formatted server-side instead (same approach `EmailSlotFormatter`
+already uses for the emails) - also just more consistent with how the
+rest of this codebase already handles time formatting.
+
+**Verified live, full flow, not just `mvnw verify`**: browser Basic-auth
+prompt on first visit; booked and cancelled real appointments through the
+form (new rows appear, flash success banners render); a deliberately bad
+booking (unknown specialty) rendered the HTML error banner, not a
+stack trace or JSON blob; a form POST with no CSRF token correctly gets
+403; the JSON API (`POST /api/appointments`) still needs no CSRF token at
+all, proving the `/api/**` exemption holds. Full `./mvnw clean verify`
+green, including a new `AdminAppointmentsControllerTest` mirroring
+`AppointmentControllerTest`'s established security-import pattern for
+`@WebMvcTest` slices.
+
+### 037 — `boundary.web` housekeeping + htmx, with a hard "never touch the JSON API" constraint
+Two things, requested together: bring `boundary.web` in line with the
+package conventions `boundary.api` (`dto/` subpackage) and `boundary.external`
+(`config/`/`kafka/`/`restclient/` subpackages) already established, and add
+htmx so the admin page's filter/book/cancel update in place instead of
+full-page reloading. The explicit instruction driving every design choice
+here: the JSON API must never be put at risk by this - not "should still
+work," but no code path shared with it should even be touched.
+
+**Package split**: `AdminAppointmentsController`'s two nested records moved
+to `boundary/web/dto/` - `BookingForm` (unchanged) and `AppointmentRow`
+(now takes its display `ZoneId` as a parameter from the controller instead
+of reading a package-private constant across a package boundary, which
+also isn't legal Java visibility-wise once `dto` is a real subpackage - a
+DTO that's a pure formatter given whatever zone it's told is the better
+shape anyway, not just a visibility workaround).
+
+**htmx design choice that makes the "never touch the API" constraint
+trivial to prove**: zero server-side branching. Vendored
+`htmx.org` 2.0.10 (checked against the npm registry, not assumed) to
+`static/vendor/htmx.min.js` rather than a CDN `<script src>` - this
+project already treats infra as explicit and self-contained (real
+docker-compose services throughout, nothing mocked away), and a demo page
+silently depending on a third-party CDN being reachable at runtime doesn't
+fit that. Every `hx-*` attribute uses `hx-select="#results"` to pull a
+fragment out of the *exact same full-page response* the plain-browser,
+JS-disabled path already returns - no `HX-Request` header inspection, no
+second response shape, no new controller code at all. `hx-swap="outerHTML"`
+so the swapped-in copy replaces the `#results` div itself rather than
+nesting a second one inside it (verified: `id="results"` appears exactly
+once in the page both before and after a full book/cancel/filter round
+trip). The existing redirect-with-flash-attribute flow needed no changes
+either - htmx's request layer follows the 302 exactly like a browser would,
+then extracts `#results` from *that* followed response, and the flash
+banner is already in it since it's consumed on the very next GET regardless
+of what triggered the request.
+
+**Verified the constraint, not just asserted it**: `git diff` after this
+change touches only `boundary/web/**`, `templates/admin/**`, and the new
+vendored static asset - nothing under `boundary/api`,
+`GlobalExceptionHandler`, or `SecurityConfig` changed in this step (their
+current state is from #036, already tested and documented then). Live
+verification simulated real htmx requests with curl (`-H "HX-Request:
+true"` alongside real cookies/CSRF tokens extracted from the rendered
+page) for book and cancel, confirmed identical behavior with or without
+that header - proof the server genuinely doesn't branch on it. Reconfirmed
+the JSON API (`POST /api/appointments`) afterward: still no CSRF token
+required, still the exact same DECISIONS.md #010/#035/#036 auth story,
+completely unaffected. Full `./mvnw clean verify` green -
+`AdminAppointmentsControllerTest` needed no behavioral changes at all,
+which is itself evidence the split was purely organizational.
+
+### 038 — Fixed the specialty filter's "All specialties" round trip, added Ends at/Duration columns
+User-reported: the admin page's specialty dropdown "wasn't working." Set
+up a real headless-Chrome session (`puppeteer-core` against the system
+Chrome, not a bundled download) to actually drive the page rather than
+keep guessing from curl - filtering to a specific specialty worked
+correctly, but selecting back to **"All specialties" returned "No
+appointments match this filter,"** wrongly.
+
+**Root cause**: `<option value="">All specialties</option>` submits
+`specialty=` - present, empty - not an omitted parameter. Spring binds
+`@RequestParam(required = false) String specialty` as `""`, not `null`,
+so `AppointmentSpecifications.hasSpecialtyCode("")` built
+`code = ''`, matching nothing. Not an htmx wiring bug at all - the
+`hx-trigger="change"` on the filter form via event bubbling was already
+confirmed working correctly in the headless session (URL updates via
+`hx-push-url`, selected value persists) before the real bug was found.
+
+**Fixed at the shared `AppointmentSpecifications.hasSpecialtyCode`**
+(`entity/repository/`), not in the web controller - blank now treated the
+same as `null` (no filter). Deliberately the shared fix, not a web-only
+workaround: it benefits the JSON `AppointmentController.list` endpoint
+identically, and doesn't change behavior for any real API client - an
+explicit `specialty=` with no value was already a nonsensical request
+before this, "treat it as no filter" is strictly more correct, not a
+compromise. Consistent with the standing "never touch the JSON API to fix
+the web layer" rule from #037 - this isn't touching it *for* the web
+layer, it's a genuine shared-code correctness fix that happens to be what
+the web layer needed.
+
+**Also added, per user request**: `AppointmentRow` (`boundary/web/dto/`)
+now formats `endsAtDisplay` and `durationDisplay` alongside the existing
+`startsAtDisplay` - duration rendered as `"45 min"` or `"1h 30min"`
+(verified both branches live). New "Ends at"/"Duration" table columns.
+Scoped explicitly to the table, not the booking form - confirmed with the
+user rather than guessed, since "start time, end time, and duration" could
+have meant adding an end-time input to the booking form instead.
+
+**Verified live**: full `./mvnw clean verify` green; real headless-browser
+session confirmed the fix (switching Dermatology → back to All correctly
+shows all appointments again) and the new columns render correctly for
+both a 45-minute and a 90-minute booking (`45 min` and `1h 30min`
+respectively).
+
+### 039 — Two more admin-page adjustments: empty-specialty hint, start+end time booking
+Two follow-ups from live user testing.
+
+**"Dropdown still not working" (round two)**: not a code bug this time -
+confirmed directly (`SELECT count(*) FROM specialty` on a database booted
+without `-Dspring-boot.run.profiles=seed`: `0`). Specialties only exist via
+`DevDataSeeder`, gated by the `seed` profile - no Flyway migration seeds
+them, by design (schema-only migrations, see `db/migration/`). Running the
+app without that flag gives a dropdown with nothing but "All specialties"
+to show, which reads exactly like "not working" from the outside even
+though it's technically correct. Fixed the *experience*, not a bug: a hint
+banner (`<div class="banner hint">`) appears whenever `${specialties}` is
+empty, pointing at the `seed` profile and the README's "Seeding data"
+section, and the booking form's specialty `<select>`/submit button are
+disabled in that state instead of being able to submit a doomed request.
+Verified both states live in a real headless-Chrome session: hint visible
++ fields disabled with an empty database, hint gone + real options present
+once seeded.
+
+**Start+end time replacing start+duration on the booking form**: the JSON
+API keeps `startTime`/`durationMinutes` (and the day-only auto-pick flow)
+exactly as-is - this is a web-UI-only shape change, since specifying a
+concrete time *range* is what an admin picking a slot actually thinks in.
+`BookingForm` (`boundary/web/dto/`) now has `startTime`/`endTime` (both
+required Strings, same hand-parsing reasoning as before) with a
+`durationMinutes()` method computing the gap; the controller validates
+`endTime` is genuinely after `startTime` before calling the unchanged
+`BookingService.book(...)`, throwing `SlotValidationException` with a
+clear message otherwise (caught by the same flash-message error path
+already in place). The day-only auto-pick branch (`bookOnDay`) is no
+longer reachable from this form - always specifying both times is a
+deliberate simplification of the *admin UI specifically*, not a
+capability removed from the app.
+
+**Verified live** with a real headless-Chrome session (not just curl):
+booked a real appointment via `startTime=09:00`/`endTime=09:45`, confirmed
+correct doctor/room assignment and `Duration: 45 min` in the table; a
+deliberately-invalid range (`endTime` before `startTime`) rendered "End
+time must be after start time" as a normal error banner, not an exception
+page. Full `./mvnw clean verify` green, `AdminAppointmentsControllerTest`
+updated to mock `bookingService.book` (not `bookOnDay`) and cover the new
+end-before-start validation case.
+
+### 040 — Fixed: booking/cancel only worked once per page load
+User-reported: after booking once, the buttons "stop working" - can't book
+again or cancel. Reproduced with a real headless-Chrome session
+(`puppeteer-core`) rather than guess from curl: the second `POST
+/admin/appointments` came back **403**, and since htmx doesn't swap error
+responses by default, the page just sat there unchanged - reading exactly
+like "the button stopped working" from the outside.
+
+**Root cause, found by inspecting raw `Set-Cookie` response headers**
+(`curl -D -` with a cookie jar across repeated requests): the `XSRF-TOKEN`
+cookie was being **deleted and reissued on every single request** -
+confirmed this happened even on plain `GET`s with no form submission
+involved, so it had nothing to do with htmx specifically. That
+delete-then-recreate pattern in one response is exactly what Spring
+Security's `CsrfAuthenticationStrategy` does on every successful
+authentication (a legitimate token-fixation defense - assumes session-based
+login, where "authentication" is a rare event). HTTP Basic re-authenticates
+on *every request*, so left at Spring's default, every single request was
+treated as a fresh login, rotating the CSRF token every time. Any page
+already rendered (the booking form, sitting outside the htmx-swapped
+`#results` div, per #037) carried a token that was invalidated by the time
+it was submitted - working exactly once, on whatever the very first
+request happened to be.
+
+**First fix attempt was wrong, and left in as a lesson**: tried
+`sessionManagement().sessionAuthenticationStrategy(new
+NullAuthenticatedSessionStrategy())` - compiled, ran, didn't fix anything
+(re-verified the cookie still rotated). Root-caused *why* by decompiling
+`CsrfConfigurer` directly rather than guessing again: it exposes its own,
+separate `sessionAuthenticationStrategy(...)` setter - identical method
+name, different configurer, and *that's* the one actually wired to
+`CsrfAuthenticationStrategy`. The `sessionManagement()` one doesn't touch
+CSRF at all. Real fix: `csrf(csrf -> csrf.sessionAuthenticationStrategy(new
+NullAuthenticatedSessionStrategy()))`. Safe here specifically because the
+app has no session to fixate in the first place
+(`SessionCreationPolicy.STATELESS`, #035) - the no-op strategy removes
+only the CSRF-rotation side effect, nothing else.
+
+**Verified live, not just re-read the code**: raw `Set-Cookie` headers
+across three sequential requests showed zero rotation after the fix
+(cookie set once, never reissued). Full headless-Chrome repro of the
+original report - book, book again, cancel - all three now succeed (302,
+not 403). Full `./mvnw clean verify` green.

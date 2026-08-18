@@ -199,6 +199,15 @@ a transactional outbox, and more) — read it alongside this README.
 ./mvnw spring-boot:run
 ```
 
+Or, to build, start infra, and run seeded in one step:
+
+```bash
+make build-and-deploy-appointments
+```
+
+(`make up`/`make down`/`make logs`/`make build`/`make clean` are also
+available individually - see the `Makefile`.)
+
 Spring Boot's Docker Compose integration auto-starts everything the app needs
 on boot (see `docker-compose.yaml`):
 
@@ -212,6 +221,13 @@ on boot (see `docker-compose.yaml`):
 
 Once running:
 - Swagger UI: `http://localhost:8080/swagger-ui.html`
+- Admin UI (server-rendered, no Swagger/curl needed):
+  `http://localhost:8080/admin/appointments` — same `admin`/`admin` HTTP
+  Basic credentials as the JSON admin listing endpoint (see DECISIONS.md
+  #010/#035/#036). Browser will prompt once. Lists appointments (filter by
+  specialty), books and cancels them through real forms backed by the same
+  `BookingService`/`CancellationService` the REST API uses — a visual way
+  to exercise the app without curl/Postman.
 - Sent emails (GreenMail web UI): `http://localhost:8082` — by default
   (no profile, i.e. `./mvnw spring-boot:run` as above) confirmation/
   cancellation emails render as plain-text ASCII art; add the `prod`

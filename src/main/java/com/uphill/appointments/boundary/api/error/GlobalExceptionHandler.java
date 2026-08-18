@@ -19,7 +19,14 @@ import com.uphill.appointments.control.SlotValidationException;
 
 import lombok.extern.slf4j.Slf4j;
 
-@RestControllerAdvice
+/**
+ * Scoped to {@code boundary.api} only - the new server-rendered
+ * {@code boundary.web} admin UI (see DECISIONS.md #036) needs its
+ * failures rendered as HTML, not this class's JSON {@link ErrorResponse}
+ * bodies, so it deliberately falls outside this advice and handles its
+ * own small set of business exceptions locally.
+ */
+@RestControllerAdvice(basePackages = "com.uphill.appointments.boundary.api")
 @Slf4j
 public class GlobalExceptionHandler {
 

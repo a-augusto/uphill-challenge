@@ -177,8 +177,16 @@ sequenceDiagram
     Listener--)Email: booking confirmation
 ```
 
-**Cancellation flow:** `POST /api/appointments/{id}/cancel` →
-`CancellationService` marks the appointment `CANCELLED`. Unlike reserving a
+**Cancellation flow:** `POST /api/appointments/{id}/cancel?patientId=...` →
+`CancellationService` marks the appointment `CANCELLED`. There's no login
+anywhere in this API, so `patientId` is the only thing stopping someone who
+merely learned or guessed an appointment's UUID from cancelling a stranger's
+booking — it must match the `patientId` the appointment was booked under, or
+the response is a plain 404 (not a distinct "forbidden," which would itself
+leak that the UUID exists). The server-rendered admin UI's own cancel
+button is exempt from this check — it's already behind HTTP Basic, so
+`CancellationService` exposes a second, unchecked `cancel(UUID)` overload
+just for that caller. See DECISIONS.md #041. Unlike reserving a
 room, *releasing* it doesn't gate anything — the cancellation is already
 correct the moment our own DB says so, so `AppointmentCancelledEvent` fires
 the same kind of after-commit, best-effort fan-out as booking: release the
@@ -263,7 +271,7 @@ curl -X POST http://localhost:8080/api/appointments \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: $(uuidgen)" \
   -d '{
-    "patientId": "PAT-0001",
+    "patientId": "PAT-000001",
     "specialtyCode": "CARDIOLOGY",
     "date": "2026-08-20",
     "startTime": "09:30:00",
@@ -296,7 +304,7 @@ silently booking outside that window if nothing fits:
 curl -X POST http://localhost:8080/api/appointments \
   -H "Content-Type: application/json" \
   -d '{
-    "patientId": "PAT-0001",
+    "patientId": "PAT-000001",
     "specialtyCode": "CARDIOLOGY",
     "date": "2026-08-20",
     "offset": "+00:00",
@@ -319,10 +327,12 @@ before booking:
 curl "http://localhost:8080/api/rooms/availability?date=2026-08-20"
 ```
 
-Cancelling frees the doctor/room/slot immediately for rebooking:
+Cancelling frees the doctor/room/slot immediately for rebooking —
+`patientId` must match who it was booked under (see **Cancellation flow**
+above; a mismatch or unknown id both come back 404):
 
 ```bash
-curl -X POST http://localhost:8080/api/appointments/{id}/cancel
+curl -X POST "http://localhost:8080/api/appointments/{id}/cancel?patientId=PAT-000001"
 ```
 
 ## Seeding data

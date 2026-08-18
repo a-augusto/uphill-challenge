@@ -1,13 +1,14 @@
 # Uphill Challenge — Appointments Service
 
-Take-home solution for Uphill Health's Senior Developer challenge: a Spring
-Boot service that schedules medical appointments in Portugal. The patient
-picks a specialty and a timeslot; the system auto-assigns an available doctor
-and room, guarantees no doctor or room is ever double-booked, and confirms the
-booking to the patient by email — while updating the doctor's calendar and
-reserving the room in (stubbed) external systems. Appointments can also be
-cancelled, freeing the doctor/room/slot for rebooking, with a symmetric
-release fan-out to the same external systems.
+Take-home solution for Uphill Health's developer challenge.
+
+Built AI-assisted, deliberately — a 1-week scope rewards throughput, and
+pairing with an AI let me spend that week on decisions instead of
+typing. Every non-obvious call made along the way is logged in
+[`DECISIONS.md`](./DECISIONS.md) as it happened, not written up after the
+fact — worth a skim if you're curious how a given piece of this got the
+shape it did, but not required reading to use or review the service
+itself.
 
 ## Stack
 
@@ -73,12 +74,15 @@ com.uphill.appointments
 │   ├── api/            inbound HTTP: REST controllers, DTOs, error handling
 │   │   └── idempotency/  Idempotency-Key store for POST /api/appointments
 │   ├── external/         outbound: room-reservation (RestClient) + doctor-calendar (Kafka) ports
-│   └── notification/       outbound: email confirmation
+│   ├── notification/       outbound: email confirmation
+│   └── web/               server-rendered admin UI (htmx) — same BookingService/
+│                          CancellationService as the REST API, in-process, no HTTP hop
 ├── control/            BookingService (allocation/retry, room-reservation gating),
 │                       RoomAvailabilityService (external day-level room filter),
 │                       CancellationService, lifecycle exceptions, after-commit fan-out
 ├── entity/             domain objects (Specialty, Doctor, Room, Patient, Appointment)
 │   └── repository/       Spring Data JPA repositories
+├── seed/               DevDataSeeder — profile-gated demo/dev fixture data (see Seeding data)
 └── config/             cross-cutting infra config (OpenAPI docs) — outside the BCE triad,
                          not tied to a specific actor
 ```
@@ -420,36 +424,92 @@ Postgres, the room-reservation system, a Kafka broker, and an SMTP endpoint
 reachable — point `spring.datasource.*`, `app.integrations.room-reservation.base-url`,
 `spring.kafka.bootstrap-servers`, and `spring.mail.*` at your target environment.
 
-## Known gaps / what's next
+## Notes, Business Assumptions, Gaps & Next Steps
 
-- **No durable retry** if a best-effort post-action fails — doctor-calendar
-  Kafka publish, confirmation/cancellation email, or room release on cancel —
-  logged, not retried. A transactional outbox would close this; deliberately
-  not built for a one-week scope. See DECISIONS.md #007. (Room *reservation*
-  during booking is different: it gates the booking attempt itself, so a
-  failure there doesn't need durable retry — the candidate pair just doesn't
-  become a booking. See DECISIONS.md #018, #020.)
-- **Appointments can't cross midnight** — a doctor's schedule is a single
-  per-day-of-week range, so a request whose computed `endsAt` falls on a
-  different calendar date than `startsAt` is rejected. See DECISIONS.md #024.
-- **Day-only "today" window-start rule has no deterministic unit test** —
-  covered by live smoke testing instead; a proper test would need a `Clock`
-  injected into `BookingService`, not introduced since nothing else needs
-  one. See DECISIONS.md #025.
-- **No patient-provisioning API** — patients only come from the `seed`
-  profile's `DevDataSeeder` (see **Seeding data**) or direct DB access;
-  there's no registration endpoint. Booking requires a `patientId` to
-  already exist. See DECISIONS.md #016, #017.
-- **Booking now has two required external round trips** (day-level
-  availability check, then per-candidate reservation) instead of one — both
-  are synchronous and both can fail the booking (409 on rejection, 503 if
-  the availability check itself can't be reached from the preview endpoint).
-  See DECISIONS.md #021.
-- **In-memory-only caching/dedup**: the room-availability cache and the
-  idempotency-key store are both plain in-memory maps — correct for a
-  single instance, but wouldn't dedupe across a multi-instance deployment.
-  Redis is the concrete fix (both stores are pure key→value+TTL — a natural
-  fit, and its native expiry would also simplify the manual TTL-sweep logic
-  both classes have today); deliberately not built for this single-instance
-  demo scope, a considered decision rather than an oversight. See
-  DECISIONS.md #026, #034.
+### Niceties
+
+- **A full test pyramid, not just "the tests pass."** Unit tests (Mockito,
+  no Spring context), slice tests (`@DataJpaTest`/`@WebMvcTest` against a
+  real Testcontainers Postgres), integration tests (real WireMock, real
+  Kafka broker, real GreenMail SMTP), and Gatling load tests — each proving
+  a different kind of correctness, from pure logic up to sustained
+  throughput.
+- **Went beyond the base spec in a few deliberate places** — variable-
+  duration appointments, day-only search, patient-overlap protection,
+  request idempotency, a server-rendered admin UI. Every one of those is
+  argued for (and against) in `DECISIONS.md`, not just present.
+- **Concurrency is a first-class concern, not an afterthought.**
+  No-overbooking is enforced by database range-exclusion constraints, not
+  application-level locking, and `BookingConcurrencyIT` proves the
+  guarantee holds under real concurrent requests — not just in a
+  single-threaded unit test.
+- **Strong local development support.** `docker-compose` stands up every
+  dependency this service talks to — Postgres, WireMock, Kafka, GreenMail —
+  as real infrastructure, not in-process fakes, so the code path exercised
+  locally is the same one that would run against the genuine external
+  systems.
+- **Observability wired end-to-end in the local environment**, not just
+  configured and hoped for — traces (Tempo), logs (Loki), and metrics
+  (Prometheus/Mimir) all flow through Grafana LGTM, verified live rather
+  than assumed to work.
+
+### Business Assumptions
+
+- A patient can't hold two overlapping appointments, the same guarantee —
+  and the same mechanism — as a doctor or room not being double-booked
+  (see `DECISIONS.md` #043).
+- Appointment slots are grid-aligned to 15-minute increments — a business
+  decision about how scheduling should feel, not a technical constraint.
+- Doctors have defined working days and hours (`DoctorSchedule`); a doctor
+  with no schedule row for a given day is simply off, not "bookable any
+  time."
+- Business hours (9am–6pm) and the working week are fixed defaults for
+  this scope — not yet configurable per doctor or per facility (see Gaps
+  below).
+
+### Gaps & Next Steps
+
+- **Working-hours modeling is intentionally shallow.** No lunch breaks, no
+  buffer time between back-to-back appointments, no per-doctor variation
+  beyond a single daily range. A real system needs a richer schedule model
+  than "one range per day of the week."
+- **This service currently owns business data it shouldn't.** Specialties,
+  staff, staff availability, and patient records are reference data a real
+  Uphill Health would own in dedicated upstream services — this service's
+  only real job should be making appointments, consuming that data rather
+  than inventing it locally.
+- That misplaced ownership is also *why* the admin listing needed a
+  fetch-join workaround for its N+1 in the first place — once
+  specialty/doctor/room/patient come from external services instead of
+  local joins, the whole shape of that problem changes (and likely gets
+  simpler, not harder).
+- **Timezone handling is "whatever offset the caller sends."** No
+  per-facility timezone concept, no explicit handling of DST-transition
+  edge cases.
+- **No concept of facilities** (hospitals, clinics, units) — rooms and
+  doctors are global rather than scoped to a location, and booking rules
+  (business hours, slot granularity) are hardcoded rather than driven by
+  facility-specific configuration.
+- No CI/CD pipeline wired up yet.
+- **Local Kubernetes development story is unfinished** — started sketching
+  manifests with Kustomize; would like to layer Tilt on top for a proper
+  local-cluster inner loop rather than relying on docker-compose alone.
+- **Auth is HTTP Basic with hardcoded credentials** — fine for a take-home,
+  not for anything real. Would want a proper IAM (Keycloak or similar) in
+  front of this, with machine-to-machine tokens for service-to-service
+  calls once this stops being a single monolith.
+- **Post-booking side effects are best-effort, fire-and-forget, with no
+  durable retry** (see `DECISIONS.md` #007) — acceptable at this scope,
+  but today a lost Kafka publish or a failed email is just a log line, not
+  a retried delivery.
+- **Event payloads have no schema/contract enforcement** (Avro, JSON
+  Schema, or similar) — a producer/consumer mismatch would only surface at
+  runtime right now.
+- A transactional outbox for the event-publishing path is probably
+  overkill at this scope, but it's the correct next step up from the
+  current after-commit-listener approach once durable delivery actually
+  matters.
+- Would like an `AGENTS.md` for this repo — the conventions and context an
+  AI coding agent (or a new teammate) needs to work in this codebase
+  productively, distinct from this human-facing README.
+

@@ -1625,3 +1625,64 @@ Deliberately only on this class, not `HtmlEmailNotificationService`
 logs, and prod has real inbox access anyway. Verified live: booked an
 appointment, watched the full box-drawn banner and body land in the console
 without touching GreenMail's UI.
+
+### 045 — Pre-submission sweep: `./mvnw verify` was actually broken
+
+Every fix this session had been checked with `./mvnw test` (Surefire —
+unit/slice tests) but never `./mvnw verify` (Surefire *and* Failsafe, i.e.
+the Docker-backed `*IT.java` suite) — and the README tells reviewers to run
+exactly `./mvnw verify`. Running it for real, ahead of submission, surfaced
+four things `test` alone couldn't have caught:
+
+- **`BookingConcurrencyIT` regressed by #043.** It fires 10 concurrent
+  bookings *for one shared patient* and expects exactly `DOCTOR_CAPACITY`
+  (2) to succeed. Since #043 added the patient-overlap exclusion
+  constraint, a single patient can never hold more than one of ten
+  identical-instant bookings regardless of how many doctors are free — the
+  test was asserting behavior the new, correct business rule forbids.
+  Fixed by giving each of the 10 requests its own patient, so the test
+  goes back to isolating doctor capacity specifically, which is what it's
+  named for.
+- **Two `ExternalIntegrationIT` cancel tests regressed by #041.** Both
+  called `POST /api/appointments/{id}/cancel` with no `patientId` — valid
+  before the IDOR fix made it required, a 500 after (see below). Fixed by
+  passing the booking's own patient id through.
+- **`roomAvailabilityEndpointReturnsExternallyAvailableRooms` regressed by
+  the `RoomController` date-param type change.** Still built its request
+  URL from a bare `LocalDate` string; the endpoint takes `OffsetDateTime`
+  now and rejected it. Fixed the URL — and along the way hit a second,
+  genuinely separate bug the fix exposed:
+- **A raw `+` in a query string is a real footgun, and the README's own
+  example walked straight into it.** `OffsetDateTime.now()`'s default
+  `toString()` includes `+01:00`-style offsets; form-urlencoded query
+  strings treat an un-encoded `+` as an encoded space, so the server saw
+  `01:00` and failed to parse it — silently, as a 500. The test switched
+  to UTC (`Z`, no `+` to mangle) rather than percent-encoding, since that
+  sidesteps the whole class of mistake instead of just this one instance
+  of it. The `README.md` example for `GET /api/rooms/availability` had
+  the exact same problem (a bare date with no time/offset at all,
+  inherited from before the endpoint's param type changed) and got the
+  same UTC fix, plus a line explaining *why* raw curl + non-UTC offsets
+  don't mix.
+- **The 500 hiding all three of the above was itself the fourth, more
+  important bug.** Every one of these failures surfaced as `500 Internal
+  Server Error`, not a `4xx` — a malformed or missing query parameter is a
+  client mistake, and `GlobalExceptionHandler` had no handler for Spring's
+  own `MethodArgumentTypeMismatchException` (bad type conversion) or
+  `MissingServletRequestParameterException` (missing required param), so
+  both fell through to the generic `Exception → 500` catch-all. This
+  affects every typed query parameter across the API (`date`, `from`,
+  `to`, the missing-`patientId` case above, and anything added later),
+  not just the specific requests that happened to surface it here — fixed
+  with two new handlers, both mapped to 400 with a message naming the
+  offending parameter and the value that failed to parse.
+
+**Root cause for why `test` never caught any of this**: Surefire and
+Failsafe are genuinely separate goals bound to separate lifecycle phases
+(`test` vs. `verify`/`integration-test`, see #015) specifically so `*IT.java`
+needs Docker and `*Test.java` doesn't — but that split means "tests still
+pass" during active development can quietly mean "the fast subset still
+passes" if `verify` isn't re-run after a change that could plausibly affect
+integration-level behavior (an exclusion constraint, a required parameter,
+a query-param type). Confirmed clean afterward: `./mvnw clean verify` — 92
+tests, 0 failures, 0 errors — and `docker build .` still succeeds.

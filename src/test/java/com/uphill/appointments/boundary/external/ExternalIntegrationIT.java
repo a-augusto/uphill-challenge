@@ -16,6 +16,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.time.Duration;
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
@@ -164,7 +165,8 @@ class ExternalIntegrationIT {
                 .getBody();
 
         ResponseEntity<AppointmentResponse> cancelResponse = restTemplate.postForEntity(
-                "/api/appointments/{id}/cancel", null, AppointmentResponse.class, booked.id());
+                "/api/appointments/{id}/cancel?patientId={patientId}", null, AppointmentResponse.class,
+                booked.id(), patient.getPatientId());
 
         assertThat(cancelResponse.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(cancelResponse.getBody().status()).isEqualTo("CANCELLED");
@@ -194,7 +196,8 @@ class ExternalIntegrationIT {
                 .getBody();
 
         ResponseEntity<AppointmentResponse> cancelResponse = restTemplate.postForEntity(
-                "/api/appointments/{id}/cancel", null, AppointmentResponse.class, booked.id());
+                "/api/appointments/{id}/cancel?patientId={patientId}", null, AppointmentResponse.class,
+                booked.id(), patient.getPatientId());
 
         assertThat(cancelResponse.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(cancelResponse.getBody().status()).isEqualTo("CANCELLED");
@@ -233,8 +236,11 @@ class ExternalIntegrationIT {
         wireMock.stubFor(get(urlPathMatching("/rooms/available"))
                 .willReturn(okJson("{\"roomIds\":[" + room.getId() + "]}")));
 
+        // UTC specifically, not the system default offset: a raw "+" in a query
+        // string is ambiguous (form-urlencoded treats it as an encoded space), and
+        // OffsetDateTime.toString() only avoids emitting one for the UTC ("Z") case.
         ResponseEntity<RoomAvailabilityResponse[]> response = restTemplate.getForEntity(
-                "/api/rooms/availability?date=" + java.time.LocalDate.now().plusDays(1),
+                "/api/rooms/availability?date=" + OffsetDateTime.now(ZoneOffset.UTC).plusDays(1),
                 RoomAvailabilityResponse[].class);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);

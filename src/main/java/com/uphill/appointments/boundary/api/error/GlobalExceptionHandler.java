@@ -5,9 +5,11 @@ import java.util.stream.Collectors;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.WebRequest;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import com.uphill.appointments.boundary.api.dto.ErrorResponse;
 import com.uphill.appointments.control.exceptions.AppointmentAllocationException;
@@ -74,6 +76,20 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleRoomAvailabilityCheckFailed(
             RoomAvailabilityCheckFailedException ex, WebRequest request) {
         return build(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), request, ex);
+    }
+
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<ErrorResponse> handleTypeMismatch(
+            MethodArgumentTypeMismatchException ex, WebRequest request) {
+        String message = ex.getName() + ": couldn't parse '" + ex.getValue() + "' as "
+                + (ex.getRequiredType() != null ? ex.getRequiredType().getSimpleName() : "the expected type");
+        return build(HttpStatus.BAD_REQUEST, message, request, ex);
+    }
+
+    @ExceptionHandler(MissingServletRequestParameterException.class)
+    public ResponseEntity<ErrorResponse> handleMissingParameter(
+            MissingServletRequestParameterException ex, WebRequest request) {
+        return build(HttpStatus.BAD_REQUEST, ex.getMessage(), request, ex);
     }
 
     @ExceptionHandler(Exception.class)

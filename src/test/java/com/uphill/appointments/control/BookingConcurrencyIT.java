@@ -81,7 +81,14 @@ class BookingConcurrencyIT {
         for (int i = 0; i < DOCTOR_CAPACITY; i++) {
             fixtures.createRoom();
         }
-        Patient patient = fixtures.createPatient();
+        // A different patient per request — this test proves *doctor* capacity is
+        // the binding constraint, and since #043 the same patient can't hold two
+        // overlapping appointments at all, which would otherwise cap successes at
+        // 1 regardless of how many doctors are free.
+        List<Patient> patients = new ArrayList<>();
+        for (int i = 0; i < CONCURRENT_REQUESTS; i++) {
+            patients.add(fixtures.createPatient());
+        }
 
         OffsetDateTime startsAt = OffsetDateTime.now().plus(Duration.ofDays(2)).truncatedTo(ChronoUnit.HOURS);
         ExecutorService executor = Executors.newFixedThreadPool(CONCURRENT_REQUESTS);
@@ -90,6 +97,7 @@ class BookingConcurrencyIT {
 
         List<Callable<HttpStatusCode>> tasks = new ArrayList<>();
         for (int i = 0; i < CONCURRENT_REQUESTS; i++) {
+            Patient patient = patients.get(i);
             tasks.add(() -> {
                 ready.countDown();
                 start.await();

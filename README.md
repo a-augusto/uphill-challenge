@@ -330,10 +330,14 @@ curl -u admin:admin "http://localhost:8080/api/appointments?specialty=CARDIOLOGY
 ```
 
 Preview which rooms the external system reports as available on a given day,
-before booking:
+before booking — `date` is a full `OffsetDateTime` (only the date component
+is used), and a UTC (`Z`) offset is worth preferring over `+01:00` in a raw
+curl command specifically: an un-encoded `+` in a query string means "space"
+by the time the server decodes it, so `%2B01:00` or `--data-urlencode` would
+be needed instead:
 
 ```bash
-curl "http://localhost:8080/api/rooms/availability?date=2026-08-20"
+curl "http://localhost:8080/api/rooms/availability?date=2026-08-20T00:00:00Z"
 ```
 
 Cancelling frees the doctor/room/slot immediately for rebooking —

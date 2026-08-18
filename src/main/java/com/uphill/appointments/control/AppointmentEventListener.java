@@ -1,5 +1,7 @@
 package com.uphill.appointments.control;
 
+import com.uphill.appointments.control.events.AppointmentBookedEvent;
+import com.uphill.appointments.control.events.AppointmentCancelledEvent;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;

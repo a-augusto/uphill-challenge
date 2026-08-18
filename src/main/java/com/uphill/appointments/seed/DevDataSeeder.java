@@ -16,7 +16,7 @@ import org.springframework.stereotype.Component;
 
 import com.uphill.appointments.entity.Doctor;
 import com.uphill.appointments.entity.DoctorSchedule;
-import com.uphill.appointments.entity.Gender;
+import com.uphill.appointments.entity.enums.Gender;
 import com.uphill.appointments.entity.Patient;
 import com.uphill.appointments.entity.Room;
 import com.uphill.appointments.entity.Specialty;

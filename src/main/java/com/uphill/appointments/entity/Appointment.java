@@ -3,6 +3,7 @@ package com.uphill.appointments.entity;
 import java.time.OffsetDateTime;
 import java.util.UUID;
 
+import com.uphill.appointments.entity.enums.AppointmentStatus;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;

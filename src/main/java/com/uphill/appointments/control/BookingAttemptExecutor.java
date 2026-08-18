@@ -2,6 +2,8 @@ package com.uphill.appointments.control;
 
 import java.time.OffsetDateTime;
 
+import com.uphill.appointments.control.events.AppointmentBookedEvent;
+import com.uphill.appointments.control.exceptions.RoomReservationFailedException;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;

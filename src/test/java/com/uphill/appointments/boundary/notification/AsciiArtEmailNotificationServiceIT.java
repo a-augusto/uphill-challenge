@@ -14,7 +14,7 @@ import org.springframework.mail.javamail.JavaMailSenderImpl;
 import com.icegreen.greenmail.junit5.GreenMailExtension;
 import com.icegreen.greenmail.util.ServerSetupTest;
 import com.uphill.appointments.entity.Appointment;
-import com.uphill.appointments.entity.AppointmentStatus;
+import com.uphill.appointments.entity.enums.AppointmentStatus;
 import com.uphill.appointments.entity.Doctor;
 import com.uphill.appointments.entity.Patient;
 import com.uphill.appointments.entity.Room;

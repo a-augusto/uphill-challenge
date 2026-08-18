@@ -15,7 +15,7 @@ public interface AppointmentRepository extends JpaRepository<Appointment, UUID>,
 
     @Query("""
             select a.doctor.id from Appointment a
-            where a.status = com.uphill.appointments.entity.AppointmentStatus.BOOKED
+            where a.status = com.uphill.appointments.entity.enums.AppointmentStatus.BOOKED
               and a.doctor.id in :doctorIds
               and a.startsAt < :endsAt and a.endsAt > :startsAt
             """)
@@ -25,7 +25,7 @@ public interface AppointmentRepository extends JpaRepository<Appointment, UUID>,
 
     @Query("""
             select a.room.id from Appointment a
-            where a.status = com.uphill.appointments.entity.AppointmentStatus.BOOKED
+            where a.status = com.uphill.appointments.entity.enums.AppointmentStatus.BOOKED
               and a.room.id in :roomIds
               and a.startsAt < :endsAt and a.endsAt > :startsAt
             """)
@@ -35,7 +35,7 @@ public interface AppointmentRepository extends JpaRepository<Appointment, UUID>,
 
     @Query("""
             select a from Appointment a
-            where a.status = com.uphill.appointments.entity.AppointmentStatus.BOOKED
+            where a.status = com.uphill.appointments.entity.enums.AppointmentStatus.BOOKED
               and a.doctor.id in :doctorIds
               and a.startsAt < :rangeEnd and a.endsAt > :rangeStart
             """)
@@ -45,7 +45,7 @@ public interface AppointmentRepository extends JpaRepository<Appointment, UUID>,
 
     @Query("""
             select a from Appointment a
-            where a.status = com.uphill.appointments.entity.AppointmentStatus.BOOKED
+            where a.status = com.uphill.appointments.entity.enums.AppointmentStatus.BOOKED
               and a.room.id in :roomIds
               and a.startsAt < :rangeEnd and a.endsAt > :rangeStart
             """)

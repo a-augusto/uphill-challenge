@@ -1,4 +1,4 @@
-package com.uphill.appointments.control;
+package com.uphill.appointments.control.events;
 
 import com.uphill.appointments.entity.Appointment;
 

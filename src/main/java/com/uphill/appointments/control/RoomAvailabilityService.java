@@ -9,6 +9,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
+import com.uphill.appointments.control.exceptions.RoomAvailabilityCheckFailedException;
 import org.springframework.stereotype.Service;
 
 import com.uphill.appointments.boundary.external.RoomReservationClient;

@@ -1,4 +1,4 @@
-package com.uphill.appointments.control;
+package com.uphill.appointments.control.exceptions;
 
 public class SlotValidationException extends RuntimeException {
 

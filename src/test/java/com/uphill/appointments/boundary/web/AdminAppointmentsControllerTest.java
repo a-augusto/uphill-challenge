@@ -33,8 +33,8 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import com.uphill.appointments.config.SecurityConfig;
-import com.uphill.appointments.control.AppointmentAllocationException;
-import com.uphill.appointments.control.AppointmentAlreadyCancelledException;
+import com.uphill.appointments.control.exceptions.AppointmentAllocationException;
+import com.uphill.appointments.control.exceptions.AppointmentAlreadyCancelledException;
 import com.uphill.appointments.control.BookingService;
 import com.uphill.appointments.control.CancellationService;
 import com.uphill.appointments.entity.Appointment;

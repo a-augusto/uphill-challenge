@@ -10,12 +10,12 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.WebRequest;
 
 import com.uphill.appointments.boundary.api.dto.ErrorResponse;
-import com.uphill.appointments.control.AppointmentAllocationException;
-import com.uphill.appointments.control.AppointmentAlreadyCancelledException;
-import com.uphill.appointments.control.AppointmentNotFoundException;
-import com.uphill.appointments.control.PatientNotFoundException;
-import com.uphill.appointments.control.RoomAvailabilityCheckFailedException;
-import com.uphill.appointments.control.SlotValidationException;
+import com.uphill.appointments.control.exceptions.AppointmentAllocationException;
+import com.uphill.appointments.control.exceptions.AppointmentAlreadyCancelledException;
+import com.uphill.appointments.control.exceptions.AppointmentNotFoundException;
+import com.uphill.appointments.control.exceptions.PatientNotFoundException;
+import com.uphill.appointments.control.exceptions.RoomAvailabilityCheckFailedException;
+import com.uphill.appointments.control.exceptions.SlotValidationException;
 
 import lombok.extern.slf4j.Slf4j;
 

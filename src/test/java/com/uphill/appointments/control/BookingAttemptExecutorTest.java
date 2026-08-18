@@ -12,6 +12,8 @@ import static org.mockito.Mockito.when;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 
+import com.uphill.appointments.control.events.AppointmentBookedEvent;
+import com.uphill.appointments.control.exceptions.RoomReservationFailedException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;

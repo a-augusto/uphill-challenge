@@ -9,6 +9,9 @@ import static org.mockito.Mockito.when;
 import java.util.Optional;
 import java.util.UUID;
 
+import com.uphill.appointments.control.events.AppointmentCancelledEvent;
+import com.uphill.appointments.control.exceptions.AppointmentAlreadyCancelledException;
+import com.uphill.appointments.control.exceptions.AppointmentNotFoundException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -17,7 +20,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
 
 import com.uphill.appointments.entity.Appointment;
-import com.uphill.appointments.entity.AppointmentStatus;
+import com.uphill.appointments.entity.enums.AppointmentStatus;
 import com.uphill.appointments.entity.repository.AppointmentRepository;
 
 @ExtendWith(MockitoExtension.class)

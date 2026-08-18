@@ -3,12 +3,15 @@ package com.uphill.appointments.control;
 import java.time.OffsetDateTime;
 import java.util.UUID;
 
+import com.uphill.appointments.control.events.AppointmentCancelledEvent;
+import com.uphill.appointments.control.exceptions.AppointmentAlreadyCancelledException;
+import com.uphill.appointments.control.exceptions.AppointmentNotFoundException;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.uphill.appointments.entity.Appointment;
-import com.uphill.appointments.entity.AppointmentStatus;
+import com.uphill.appointments.entity.enums.AppointmentStatus;
 import com.uphill.appointments.entity.repository.AppointmentRepository;
 
 import lombok.RequiredArgsConstructor;

@@ -1,4 +1,4 @@
-package com.uphill.appointments.control;
+package com.uphill.appointments.control.exceptions;
 
 /**
  * Thrown when the external room-reservation system's availability check

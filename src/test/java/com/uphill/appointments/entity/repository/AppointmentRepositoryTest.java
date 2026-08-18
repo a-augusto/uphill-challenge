@@ -16,7 +16,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.dao.DataIntegrityViolationException;
 
 import com.uphill.appointments.entity.Appointment;
-import com.uphill.appointments.entity.AppointmentStatus;
+import com.uphill.appointments.entity.enums.AppointmentStatus;
 import com.uphill.appointments.entity.Doctor;
 import com.uphill.appointments.entity.Patient;
 import com.uphill.appointments.entity.Room;

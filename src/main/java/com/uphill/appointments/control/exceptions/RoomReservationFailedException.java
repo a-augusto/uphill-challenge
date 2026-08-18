@@ -1,4 +1,6 @@
-package com.uphill.appointments.control;
+package com.uphill.appointments.control.exceptions;
+
+import com.uphill.appointments.control.BookingService;
 
 /**
  * Thrown when the external room-reservation system rejects or fails to

@@ -208,11 +208,21 @@ on boot (see `docker-compose.yaml`):
 | `wiremock` | stub room-reservation API | 8081 |
 | `kafka` | doctor-calendar event broker | 9092 |
 | `greenmail` | fake SMTP server for confirmation emails | 3025 (SMTP), 8082 (web UI) |
-| `grafana-lgtm` | OpenTelemetry collector + dashboards | 3000 |
+| `grafana-lgtm` | OpenTelemetry collector + dashboards | 3000 (UI), 4317/4318 (OTLP) |
 
 Once running:
 - Swagger UI: `http://localhost:8080/swagger-ui.html`
 - Sent emails (GreenMail web UI): `http://localhost:8082`
+- Grafana (traces/metrics): `http://localhost:3000` (admin/admin) —
+  Explore → Tempo for request traces (`service.name = appointments`,
+  includes the auto-instrumented room-reservation HTTP call as a child
+  span), Explore → Prometheus for business metrics
+  (`appointments_booked_total`, `appointments_cancelled_total`,
+  `appointments_booking_failed_total`). Trace/span IDs also show up
+  directly in console log lines once tracing is active — Boot's default
+  correlation pattern, no config needed for that part. Log export to Loki
+  doesn't work yet — see **Known gaps** below.
+- Health check: `curl http://localhost:8080/actuator/health`
 
 ### Example request
 
@@ -331,6 +341,13 @@ reachable — point `spring.datasource.*`, `app.integrations.room-reservation.ba
 
 ## Known gaps / what's next
 
+- **Log export to Loki doesn't work yet** — traces and metrics are both
+  confirmed live in Tempo/Prometheus, but the OTLP logging exporter
+  produces no visible activity (no startup log line unlike the metrics
+  exporter, and Loki's own label API stays empty even after generating
+  volume and waiting past the export interval). Needs further
+  investigation; not blocking traces/metrics, which are the higher-value
+  signals and both work. See DECISIONS.md #028.
 - **No auth** on the admin listing endpoint — out of scope per the spec, but
   the first thing to add before any real traffic. See DECISIONS.md #010.
 - **No durable retry** if a best-effort post-action fails — doctor-calendar

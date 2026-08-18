@@ -35,6 +35,9 @@ import com.uphill.appointments.entity.repository.DoctorScheduleRepository;
 import com.uphill.appointments.entity.repository.PatientRepository;
 import com.uphill.appointments.entity.repository.SpecialtyRepository;
 
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+
 @ExtendWith(MockitoExtension.class)
 class BookingServiceTest {
 
@@ -53,6 +56,8 @@ class BookingServiceTest {
     @Mock
     private BookingAttemptExecutor bookingAttemptExecutor;
 
+    private final MeterRegistry meterRegistry = new SimpleMeterRegistry();
+
     private BookingService bookingService;
 
     private Specialty cardiology;
@@ -67,7 +72,7 @@ class BookingServiceTest {
     void setUp() {
         bookingService = new BookingService(
                 specialtyRepository, doctorRepository, doctorScheduleRepository, roomAvailabilityService,
-                patientRepository, appointmentRepository, bookingAttemptExecutor);
+                patientRepository, appointmentRepository, bookingAttemptExecutor, meterRegistry);
 
         cardiology = new Specialty();
         cardiology.setId(1L);
@@ -210,6 +215,8 @@ class BookingServiceTest {
 
         assertThatThrownBy(() -> bookingService.book("CARDIOLOGY", "PAT-0001", startsAt, null))
                 .isInstanceOf(AppointmentAllocationException.class);
+        assertThat(meterRegistry.counter("appointments.booking.failed", "reason", "no_availability").count())
+                .isEqualTo(1.0);
     }
 
     @Test
@@ -226,6 +233,8 @@ class BookingServiceTest {
         assertThatThrownBy(() -> bookingService.book("CARDIOLOGY", "PAT-0001", startsAt, null))
                 .isInstanceOf(AppointmentAllocationException.class)
                 .hasCause(cause);
+        assertThat(meterRegistry.counter("appointments.booking.failed", "reason", "external_check_failed").count())
+                .isEqualTo(1.0);
     }
 
     @Test

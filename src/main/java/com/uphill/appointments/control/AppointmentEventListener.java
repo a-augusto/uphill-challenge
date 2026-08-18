@@ -9,6 +9,7 @@ import com.uphill.appointments.boundary.external.DoctorCalendarClient;
 import com.uphill.appointments.boundary.external.RoomReservationClient;
 import com.uphill.appointments.boundary.notification.NotificationService;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
@@ -36,10 +37,12 @@ public class AppointmentEventListener {
     private final DoctorCalendarClient doctorCalendarClient;
     private final RoomReservationClient roomReservationClient;
     private final NotificationService notificationService;
+    private final MeterRegistry meterRegistry;
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void onAppointmentBooked(AppointmentBookedEvent event) {
         Appointment appointment = event.appointment();
+        meterRegistry.counter("appointments.booked", "specialty", appointment.getSpecialty().getCode()).increment();
 
         runBestEffort("doctor calendar reserve", appointment, () ->
                 doctorCalendarClient.reserveSlot(
@@ -55,6 +58,7 @@ public class AppointmentEventListener {
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void onAppointmentCancelled(AppointmentCancelledEvent event) {
         Appointment appointment = event.appointment();
+        meterRegistry.counter("appointments.cancelled", "specialty", appointment.getSpecialty().getCode()).increment();
 
         runBestEffort("room release", appointment, () ->
                 roomReservationClient.releaseRoom(appointment.getRoom().getId(), appointment.getId()));

@@ -818,3 +818,59 @@ real coverage gap, two defense-in-depth guardrails.
   another still said "partial indexes" from before Stage 1); README's
   architecture tree didn't list the `boundary/api/idempotency/` package
   added in #026.
+
+### 028 — Observability wired to Grafana LGTM
+`docker-compose.yaml` already ran `grafana/otel-lgtm` and the pom already
+had `spring-boot-starter-opentelemetry`, but none of it was actually
+connected — zero `otel.*`/`management.*` config, no Actuator, 10% default
+trace sampling, no custom metrics.
+
+**Verified against the actual jars in `~/.m2` before writing any config**,
+not guessed from memory (this is a newer Spring Boot 4 module, worth being
+careful about): `spring-boot-starter-opentelemetry` already transitively
+pulls in `spring-boot-starter-micrometer-metrics`, `micrometer-registry-otlp`,
+`micrometer-tracing-bridge-otel`, and `opentelemetry-exporter-otlp` — metrics/
+traces/logs export all work via background exporters, **none of it needs
+Actuator**. Added `spring-boot-starter-actuator` anyway, but only for the
+`/actuator/health` HTTP endpoint, not for telemetry export.
+
+**`spring-boot-docker-compose` has no built-in connection-details support
+for the `grafana/otel-lgtm` image** (confirmed by inspecting the jar's
+contents — no matching factory class), unlike Postgres/Kafka in this same
+compose file. So `docker-compose.yaml`'s OTLP ports (`4317`, `4318`,
+previously Docker-assigned) are now pinned, and `application.properties`
+points at them explicitly — consistent with how every other integration in
+this project already works (WireMock, Kafka, mail all use pinned ports +
+explicit properties, never auto-discovery), not a workaround specific to
+this one.
+
+`management.tracing.sampling.probability=1.0` — 100% for local/dev
+visibility; the Boot default (10%) is fine for prod but means most
+requests wouldn't show up in Tempo during a demo.
+
+**Custom business metrics**: `MeterRegistry` injected directly into
+`AppointmentEventListener` (`appointments.booked`/`appointments.cancelled`,
+tagged `specialty`) and `BookingService` (`appointments.booking.failed`,
+tagged `reason` — `no_availability` or `external_check_failed`). No new
+abstraction layer; same `@RequiredArgsConstructor` pattern as every other
+dependency in both classes.
+
+**Verified live, not just configured**: booked appointments through the
+running app, confirmed via Grafana's datasource proxy API —
+`appointments_booked_total{specialty="CARDIOLOGY"}` present and
+incrementing in Prometheus/Mimir; real traces in Tempo for
+`POST /api/appointments`, including an auto-instrumented child span for
+the room-reservation HTTP call (free, from `RestClient.Builder`'s
+Observation integration — no code added for that specifically); trace/span
+IDs appearing in console log lines automatically, with zero
+`logging.pattern` changes (Boot's default correlation pattern once tracing
+is active).
+
+**Known gap, not silently dropped**: log export to Loki did not work — the
+`management.opentelemetry.logging.export.otlp.endpoint` property is set and
+the app starts cleanly, but Loki's own label API shows zero ingested data
+even after generating log volume and waiting past the export interval,
+while the metrics exporter explicitly logs its own publish schedule at
+startup and the trace exporter visibly works. Traces and metrics — the two
+higher-value signals — are fully confirmed; OTLP log export needs further
+investigation as a follow-up, not treated as done.

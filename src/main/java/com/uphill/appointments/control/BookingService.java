@@ -29,6 +29,7 @@ import com.uphill.appointments.entity.repository.DoctorScheduleRepository;
 import com.uphill.appointments.entity.repository.PatientRepository;
 import com.uphill.appointments.entity.repository.SpecialtyRepository;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
@@ -66,6 +67,7 @@ public class BookingService {
     private final PatientRepository patientRepository;
     private final AppointmentRepository appointmentRepository;
     private final BookingAttemptExecutor bookingAttemptExecutor;
+    private final MeterRegistry meterRegistry;
 
     private record Candidate(Doctor doctor, Room room, OffsetDateTime startsAt, OffsetDateTime endsAt) {
     }
@@ -85,6 +87,7 @@ public class BookingService {
         List<Doctor> availableDoctors = availableDoctors(specialty, startsAt, endsAt);
         List<Room> availableRooms = availableRooms(startsAt, endsAt);
         if (availableDoctors.isEmpty() || availableRooms.isEmpty()) {
+            recordBookingFailure("no_availability");
             throw new AppointmentAllocationException(
                     "No available doctor/room for specialty " + specialtyCode + " at " + startsAt);
         }
@@ -123,11 +126,13 @@ public class BookingService {
         OffsetDateTime windowEnd = OffsetDateTime.of(date, WINDOW_END, offset);
         String noAvailabilityMessage = "No available doctor/room for specialty " + specialtyCode + " on " + date;
         if (!windowStart.isBefore(windowEnd)) {
+            recordBookingFailure("no_availability");
             throw new AppointmentAllocationException(noAvailabilityMessage);
         }
 
         List<Candidate> candidates = dayOnlyCandidates(specialty, new Interval(windowStart, windowEnd), duration);
         if (candidates.isEmpty()) {
+            recordBookingFailure("no_availability");
             throw new AppointmentAllocationException(noAvailabilityMessage);
         }
         return tryBookCandidates(candidates, specialty, patient, noAvailabilityMessage);
@@ -174,7 +179,8 @@ public class BookingService {
         try {
             rooms = roomAvailabilityService.availableRoomsOn(window.start().toLocalDate());
         } catch (RoomAvailabilityCheckFailedException e) {
-            log.warn("Room availability check failed for {}", window.start().toLocalDate(), e);
+            recordBookingFailure("external_check_failed");
+            log.warn("Room availability check failed for {}",window.start().toLocalDate(), e);
             throw new AppointmentAllocationException("Unable to determine room availability: " + e.getMessage(), e);
         }
         List<Long> roomIds = rooms.stream().map(Room::getId).toList();
@@ -259,7 +265,12 @@ public class BookingService {
                         candidate.room().getId(), specialty.getCode(), candidate.startsAt(), roomFailure);
             }
         }
+        recordBookingFailure("no_availability");
         throw new AppointmentAllocationException(exhaustedMessage);
+    }
+
+    private void recordBookingFailure(String reason) {
+        meterRegistry.counter("appointments.booking.failed", "reason", reason).increment();
     }
 
     private List<Doctor> availableDoctors(Specialty specialty, OffsetDateTime startsAt, OffsetDateTime endsAt) {
@@ -289,7 +300,8 @@ public class BookingService {
         try {
             rooms = roomAvailabilityService.availableRoomsOn(startsAt.toLocalDate());
         } catch (RoomAvailabilityCheckFailedException e) {
-            log.warn("Room availability check failed for {}", startsAt.toLocalDate(), e);
+            recordBookingFailure("external_check_failed");
+            log.warn("Room availability check failed for {}",startsAt.toLocalDate(), e);
             throw new AppointmentAllocationException("Unable to determine room availability: " + e.getMessage(), e);
         }
         List<Long> roomIds = rooms.stream().map(Room::getId).toList();

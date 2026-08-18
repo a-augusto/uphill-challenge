@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.httpBasic;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -25,7 +26,12 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentMatchers;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.security.autoconfigure.SecurityAutoConfiguration;
+import org.springframework.boot.security.autoconfigure.UserDetailsServiceAutoConfiguration;
+import org.springframework.boot.security.autoconfigure.web.servlet.SecurityFilterAutoConfiguration;
+import org.springframework.boot.security.autoconfigure.web.servlet.ServletWebSecurityAutoConfiguration;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
@@ -39,6 +45,7 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.uphill.appointments.boundary.api.dto.AppointmentResponse;
 import com.uphill.appointments.boundary.api.dto.CreateAppointmentRequest;
 import com.uphill.appointments.boundary.api.idempotency.IdempotencyKeyStore;
+import com.uphill.appointments.config.SecurityConfig;
 import com.uphill.appointments.control.AppointmentAllocationException;
 import com.uphill.appointments.control.AppointmentAlreadyCancelledException;
 import com.uphill.appointments.control.AppointmentNotFoundException;
@@ -55,6 +62,8 @@ import com.uphill.appointments.entity.Specialty;
 import com.uphill.appointments.entity.repository.AppointmentRepository;
 
 @WebMvcTest(AppointmentController.class)
+@Import({SecurityConfig.class, SecurityAutoConfiguration.class, ServletWebSecurityAutoConfiguration.class,
+        SecurityFilterAutoConfiguration.class, UserDetailsServiceAutoConfiguration.class})
 class AppointmentControllerTest {
 
     @Autowired
@@ -215,9 +224,15 @@ class AppointmentControllerTest {
         when(appointmentRepository.findAll(ArgumentMatchers.<Specification<Appointment>>any(), any(Pageable.class)))
                 .thenReturn(new PageImpl<>(List.of(sampleAppointment())));
 
-        mockMvc.perform(get("/api/appointments"))
+        mockMvc.perform(get("/api/appointments").with(httpBasic("admin", "admin")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content[0].doctorName").value("Dr. Ana Ferreira"));
+    }
+
+    @Test
+    void listRequiresAuthentication() throws Exception {
+        mockMvc.perform(get("/api/appointments"))
+                .andExpect(status().isUnauthorized());
     }
 
     private static CreateAppointmentRequest sampleRequest() {

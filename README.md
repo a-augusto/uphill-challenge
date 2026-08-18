@@ -288,8 +288,12 @@ curl -X POST http://localhost:8080/api/appointments \
   }'
 ```
 
+The listing endpoint is the one route this API protects — see
+**DECISIONS.md #010/#035** — HTTP Basic, `admin`/`admin` by default
+(`spring.security.user.name`/`.password`):
+
 ```bash
-curl "http://localhost:8080/api/appointments?specialty=CARDIOLOGY&page=0&size=20"
+curl -u admin:admin "http://localhost:8080/api/appointments?specialty=CARDIOLOGY&page=0&size=20"
 ```
 
 Preview which rooms the external system reports as available on a given day,
@@ -323,8 +327,8 @@ the 4 real specialty codes (`CARDIOLOGY`, `DERMATOLOGY`, `GENERAL_PRACTICE`,
 9am–6pm `DoctorSchedule`, weekends off), 5 rooms, and ~30 patients with
 realistic mock demographics via [DataFaker](https://www.datafaker.net/)
 (business ids `PAT-000001`, `PAT-000002`, ...). Check the app log or query
-`GET /api/appointments` after booking to find generated `patientId`s to test
-with.
+`GET /api/appointments` (`-u admin:admin`, see **Example request**) after
+booking to find generated `patientId`s to test with.
 
 ## Running the tests
 
@@ -379,8 +383,6 @@ reachable — point `spring.datasource.*`, `app.integrations.room-reservation.ba
 
 ## Known gaps / what's next
 
-- **No auth** on the admin listing endpoint — out of scope per the spec, but
-  the first thing to add before any real traffic. See DECISIONS.md #010.
 - **No durable retry** if a best-effort post-action fails — doctor-calendar
   Kafka publish, confirmation/cancellation email, or room release on cancel —
   logged, not retried. A transactional outbox would close this; deliberately

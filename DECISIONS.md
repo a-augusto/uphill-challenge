@@ -1177,3 +1177,56 @@ grafana-lgtm) for a problem that only exists once you run 2+ instances is
 premature here. Recorded as a deliberate, considered decision rather than
 an oversight — flagged in README's known gaps with the concrete fix named,
 so it's a five-minute change when it's actually needed, not a rediscovery.
+
+### 035 — Auth on the admin listing endpoint, closing #010
+#010 left `GET /api/appointments` (the "admin" listing endpoint) wide open
+since the spec never defined an auth scheme. Discussed and built the
+proportional fix: `spring-boot-starter-security` with one
+`SecurityFilterChain` bean (`config.SecurityConfig`), HTTP Basic, and
+exactly one restricted route -
+`.requestMatchers(HttpMethod.GET, "/api/appointments").authenticated()`,
+everything else `permitAll()`. CSRF disabled and sessions set
+`STATELESS` - no cookies or forms anywhere in this API, Basic auth is
+per-request, a session would be dead weight for nothing. Credentials via
+`spring.security.user.name`/`.password` in `application.properties`
+(`admin`/`admin` - mirrors the Grafana admin/admin already used for local
+dev in this project, same tone: explicit and simple for a demo, not meant
+to survive contact with real traffic).
+
+**Considered and rejected**: Keycloak/full OAuth2. Reasonable *if* this
+ever needs multi-client delegated auth (several distinct client
+applications, SSO, token-based access across services) - not needed for
+one admin endpoint on one service. Logged as the forward-looking direction
+if that need ever materializes; `spring-boot-starter-oauth2-resource-server`
+validating JWTs would be the natural next step at that point, with Keycloak
+as a reasonable *token issuer* choice, not before.
+
+**A real gotcha surfaced fixing the `@WebMvcTest` slice**: adding
+`spring-boot-starter-security` to the classpath doesn't automatically wire
+security into `@WebMvcTest(AppointmentController.class)` the way often
+assumed - the slice's autoconfiguration whitelist doesn't include Boot
+4's renamed `org.springframework.boot.security.autoconfigure.*` classes at
+all, so `@Import(SecurityConfig.class)` alone failed outright: no
+`HttpSecurity` bean exists without the real security autoconfiguration
+present. Fixed by explicitly importing what's actually needed -
+`SecurityAutoConfiguration` (registers `SecurityProperties`, source of the
+`admin`/`admin` credentials), `ServletWebSecurityAutoConfiguration`
+(wires `HttpSecurity` itself), `SecurityFilterAutoConfiguration` (puts the
+filter into the MockMvc chain), `UserDetailsServiceAutoConfiguration`
+(builds the in-memory user) - alongside `SecurityConfig`, on the test
+class. Diagnosed by reading the actual failure chain rather than guessing
+(`No qualifying bean of type HttpSecurity` → `SecurityProperties`
+missing → traced each to its owning autoconfiguration class by unzipping
+`spring-boot-security-4.0.7.jar`'s own `AutoConfiguration.imports`).
+`listReturnsPagedAppointments` now authenticates via
+`spring-security-test`'s `httpBasic("admin", "admin")` request
+post-processor; a new `listRequiresAuthentication` test proves the 401
+case. No other test in the suite touches this route (confirmed by
+grepping every IT/Gatling simulation for it), so nothing else needed
+changing.
+
+**Verified live, full matrix**: unauthenticated `GET /api/appointments` →
+401; `-u admin:admin` → 200; wrong credentials → 401; booking, cancellation,
+room availability, Swagger UI, and actuator health all still 200/normal
+without any credentials - the rule is additive, touches nothing else. Full
+`./mvnw clean verify` green.

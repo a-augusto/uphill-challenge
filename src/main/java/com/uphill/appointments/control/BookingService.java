@@ -138,13 +138,27 @@ public class BookingService {
         if (!date.equals(now.toLocalDate())) {
             return fixedStart;
         }
-        long gridSeconds = GRID.getSeconds();
-        long remainder = now.toEpochSecond() % gridSeconds;
-        OffsetDateTime ceilNow = remainder == 0 ? now : now.plusSeconds(gridSeconds - remainder);
+        OffsetDateTime ceilNow = ceilToGrid(now);
         if (!ceilNow.isAfter(now)) {
-            ceilNow = ceilNow.plusSeconds(gridSeconds);
+            ceilNow = ceilNow.plusSeconds(GRID.getSeconds());
         }
         return ceilNow.isAfter(fixedStart) ? ceilNow : fixedStart;
+    }
+
+    /**
+     * Rounds up to the next 15-minute grid line. Free-window bounds are
+     * normally already grid-aligned by construction (appointments, the
+     * business window, "now" above) — the one exception is a
+     * {@link DoctorSchedule} row, which nothing currently validates as
+     * grid-aligned. Snapping here means a misaligned schedule can't produce
+     * a misaligned booking; {@link #dayOnlyCandidates} re-checks the
+     * duration still fits after snapping, since rounding up can eat into a
+     * narrow gap.
+     */
+    private static OffsetDateTime ceilToGrid(OffsetDateTime time) {
+        long gridSeconds = GRID.getSeconds();
+        long remainder = time.toEpochSecond() % gridSeconds;
+        return remainder == 0 ? time : time.plusSeconds(gridSeconds - remainder);
     }
 
     private List<Candidate> dayOnlyCandidates(Specialty specialty, Interval window, Duration duration) {
@@ -202,7 +216,9 @@ public class BookingService {
                 List<Interval> roomFree =
                         FreeWindowFinder.freeWindows(window, busyByRoom.getOrDefault(room.getId(), List.of()));
                 FreeWindowFinder.intersect(doctorFree, roomFree).stream()
-                        .filter(i -> Duration.between(i.start(), i.end()).compareTo(duration) >= 0)
+                        .map(i -> new Interval(ceilToGrid(i.start()), i.end()))
+                        .filter(i -> !i.start().isAfter(i.end())
+                                && Duration.between(i.start(), i.end()).compareTo(duration) >= 0)
                         .findFirst()
                         .ifPresent(fit -> candidates.add(new Candidate(doctor, room, fit.start(), fit.start().plus(duration))));
             }

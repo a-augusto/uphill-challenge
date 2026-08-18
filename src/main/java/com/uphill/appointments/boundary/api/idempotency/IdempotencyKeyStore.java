@@ -25,6 +25,12 @@ import com.uphill.appointments.boundary.api.dto.AppointmentResponse;
  * brand-new key can both execute (no locking/coalescing). In-memory, so
  * this only dedupes within a single instance — noted as a known limitation
  * alongside {@code RoomAvailabilityService}'s cache.
+ *
+ * <p>Expired entries are swept on every {@link #put}, not just lazily on
+ * {@link #get} — a key that's stored and never re-queried (the normal case,
+ * since a well-behaved client sends a fresh key per booking) would
+ * otherwise never be removed and the map would grow unbounded under
+ * sustained traffic.
  */
 @Component
 public class IdempotencyKeyStore {
@@ -41,7 +47,7 @@ public class IdempotencyKeyStore {
         if (stored == null) {
             return Optional.empty();
         }
-        if (Instant.now().isAfter(stored.storedAt().plus(TTL))) {
+        if (isExpired(stored)) {
             store.remove(key);
             return Optional.empty();
         }
@@ -50,5 +56,10 @@ public class IdempotencyKeyStore {
 
     public void put(String key, HttpStatus status, AppointmentResponse body) {
         store.put(key, new StoredResponse(status, body, Instant.now()));
+        store.values().removeIf(this::isExpired);
+    }
+
+    private boolean isExpired(StoredResponse stored) {
+        return Instant.now().isAfter(stored.storedAt().plus(TTL));
     }
 }

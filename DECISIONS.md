@@ -770,3 +770,51 @@ files.
   execute (no locking/coalescing) — this closes "client retried because it
   never saw the response," not every conceivable race. In-memory, same
   single-instance caveat as the availability cache.
+
+### 027 — Full-repo review pass, seven findings fixed
+Ran a skeptical read-through of the whole repo (not just this session's own
+diffs) — mostly documentation drift from several rounds of refactoring, one
+real coverage gap, two defense-in-depth guardrails.
+
+- **`bookOnDay` now snaps its computed start time to the 15-minute grid**
+  (`BookingService.ceilToGrid`, reused by `effectiveWindowStart` too, which
+  already needed the same rounding for the "today" case). Nothing
+  validates a `DoctorSchedule` row is itself grid-aligned — the new
+  `chk_doctor_schedule_time_order` constraint below only rejects a
+  *reversed* range (`start >= end`), not a misaligned one (`09:07`–`18:00`
+  is valid data). Without the snap, a misaligned schedule could silently
+  produce a misaligned booking. Snapping re-checks the duration still fits
+  after rounding up, since that can eat into a narrow gap.
+- **`doctor_schedule` gets a `CHECK (start_time < end_time)` constraint**
+  (edited `V4` in place, same standing pre-prod permission). No admin API
+  creates schedules today — only the seeder and `TestDataFactory` — so this
+  was previously unenforced at the DB level; a reversed row failed safe
+  (the doctor just became permanently non-candidate) but nothing rejected
+  the bad data at write time.
+- **New `BookingConcurrencyIT` case** proving the range-exclusion
+  constraint itself — not just the original same-instant unique-index
+  case — holds under real concurrency: two requests for the same doctor
+  with overlapping-but-different time ranges, fired concurrently, exactly
+  one succeeds. The existing concurrency test only exercised the
+  same-exact-instant race that predates #024's variable-duration change;
+  the overlap case was previously proven only single-threaded, in
+  `AppointmentRepositoryTest`. Given how much this project's own docs lean
+  on "proven under contention, not just a unit test," that was a real gap
+  for Stage 1's headline feature.
+- **`IdempotencyKeyStore` sweeps expired entries on every `put`**, not just
+  lazily on `get`. A key that's stored and never re-queried (the normal
+  case — a well-behaved client sends a fresh key per booking) previously
+  stayed in the map forever; the fix bounds growth to roughly one TTL
+  window's worth of traffic instead of unbounded. Not unit-tested for the
+  same reason as #025's "today" window-start rule — verifying real 24-hour
+  expiry needs an injectable `Clock`, not otherwise used anywhere in the
+  codebase; the sweep logic itself is a single `removeIf` call, low enough
+  risk to accept without one.
+- **Stale references fixed**: a javadoc `{@link PostBookingEventListener}`
+  in `BookingAttemptExecutor` (renamed in #020) and a "DB unique
+  constraint" mention in the same class (superseded by the range-exclusion
+  constraint in #024); README self-contradicted on the no-overbooking
+  mechanism (one paragraph correctly said "range-exclusion constraint,"
+  another still said "partial indexes" from before Stage 1); README's
+  architecture tree didn't list the `boundary/api/idempotency/` package
+  added in #026.

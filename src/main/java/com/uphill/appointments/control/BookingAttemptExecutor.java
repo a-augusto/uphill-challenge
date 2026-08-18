@@ -29,11 +29,11 @@ import lombok.RequiredArgsConstructor;
  * <p>The room-reservation call is synchronous and inside this same
  * transaction: a room must actually be secured for the appointment to be
  * valid, so the external system's answer gates the attempt exactly like the
- * DB unique constraint does — if it rejects, this transaction rolls back
- * (undoing the insert) and {@link BookingService} tries the next candidate
- * pair. The doctor-calendar update has no such correctness requirement
- * (fire-and-forget via Kafka instead) so it stays in the after-commit
- * best-effort fan-out in {@link PostBookingEventListener}.
+ * DB range-exclusion constraint does — if it rejects, this transaction rolls
+ * back (undoing the insert) and {@link BookingService} tries the next
+ * candidate pair. The doctor-calendar update has no such correctness
+ * requirement (fire-and-forget via Kafka instead) so it stays in the
+ * after-commit best-effort fan-out in {@link AppointmentEventListener}.
  *
  * <p>The {@link AppointmentBookedEvent} is published from here too, not from
  * BookingService, and deliberately inside this same transaction: it gives

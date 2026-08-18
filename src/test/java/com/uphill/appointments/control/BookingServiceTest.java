@@ -408,6 +408,35 @@ class BookingServiceTest {
     }
 
     @Test
+    void bookOnDaySnapsMisalignedScheduleStartToNextGridLine() {
+        // The DB CHECK only enforces start_time < end_time, not grid alignment —
+        // a schedule row of 09:07-18:00 is valid data. bookOnDay must not hand
+        // back a non-grid-aligned start even so.
+        LocalDate date = futureDate();
+        when(specialtyRepository.findByCode("CARDIOLOGY")).thenReturn(Optional.of(cardiology));
+        when(patientRepository.findByPatientId("PAT-0001")).thenReturn(Optional.of(patient));
+        when(doctorRepository.findBySpecialtyAndActiveTrue(cardiology)).thenReturn(List.of(drA));
+        when(doctorScheduleRepository.findByDoctorIdInAndDayOfWeek(any(), any()))
+                .thenReturn(List.of(scheduleFor(drA, date, LocalTime.of(9, 7), LocalTime.of(18, 0))));
+        when(roomAvailabilityService.availableRoomsOn(date)).thenReturn(List.of(room1));
+        when(appointmentRepository.findBookedAppointmentsForDoctorsOverlapping(any(), any(), any())).thenReturn(List.of());
+        when(appointmentRepository.findBookedAppointmentsForRoomsOverlapping(any(), any(), any())).thenReturn(List.of());
+        when(bookingAttemptExecutor.attemptBook(any(), any(), any(), any(), any(), any()))
+                .thenAnswer(inv -> {
+                    Appointment appointment = new Appointment();
+                    appointment.setDoctor(inv.getArgument(0));
+                    appointment.setRoom(inv.getArgument(1));
+                    appointment.setStartsAt(inv.getArgument(4));
+                    appointment.setEndsAt(inv.getArgument(5));
+                    return appointment;
+                });
+
+        Appointment result = bookingService.bookOnDay("CARDIOLOGY", "PAT-0001", date, ZoneOffset.UTC, 30);
+
+        assertThat(result.getStartsAt().toLocalTime()).isEqualTo(LocalTime.of(9, 15));
+    }
+
+    @Test
     void bookOnDaySkipsDoctorsBusyPeriodAndFindsNextGap() {
         LocalDate date = futureDate();
         OffsetDateTime nineAm = OffsetDateTime.of(date, LocalTime.of(9, 0), ZoneOffset.UTC);

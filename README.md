@@ -70,7 +70,8 @@ Package structure follows **Boundary-Control-Entity (BCE)**:
 ```
 com.uphill.appointments
 ├── boundary/
-│   ├── api/            inbound HTTP: REST controller, DTOs, error handling
+│   ├── api/            inbound HTTP: REST controllers, DTOs, error handling
+│   │   └── idempotency/  Idempotency-Key store for POST /api/appointments
 │   ├── external/         outbound: room-reservation (RestClient) + doctor-calendar (Kafka) ports
 │   └── notification/       outbound: email confirmation
 ├── control/            BookingService (allocation/retry, room-reservation gating),
@@ -183,13 +184,13 @@ correct the moment our own DB says so, so `AppointmentCancelledEvent` fires
 the same kind of after-commit, best-effort fan-out as booking: release the
 room (WireMock), release the doctor-calendar slot (Kafka), send a
 cancellation email. A cancelled appointment's doctor/room/slot becomes
-available again immediately (the no-overbooking indexes are partial,
-filtered to `status = 'BOOKED'`). "Reschedule" is just cancel + a fresh
+available again immediately (the no-overbooking range-exclusion constraint
+is filtered to `status = 'BOOKED'`). "Reschedule" is just cancel + a fresh
 booking call — no dedicated endpoint.
 
 See [`DECISIONS.md`](./DECISIONS.md) for the reasoning behind every
-non-obvious call (why a unique constraint instead of row locking, why
-WireMock instead of an in-process fake, why an after-commit event instead of
+non-obvious call (why a range-exclusion constraint instead of row locking,
+why WireMock instead of an in-process fake, why an after-commit event instead of
 a transactional outbox, and more) — read it alongside this README.
 
 ## Running locally

@@ -12,6 +12,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.stream.Stream;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -117,5 +118,64 @@ class BookingConcurrencyIT {
 
         assertThat(successCount).isEqualTo(DOCTOR_CAPACITY);
         assertThat(successCount + conflictCount).isEqualTo(CONCURRENT_REQUESTS);
+    }
+
+    /**
+     * The test above proves the original same-exact-instant race. Since
+     * appointments now have variable duration (#024), two candidates can
+     * overlap without sharing a {@code starts_at} — this proves the
+     * range-exclusion constraint actually blocks *that* race too, under
+     * real concurrency, not just the single-threaded proof in
+     * AppointmentRepositoryTest.
+     */
+    @Test
+    void onlyOneOfTwoOverlappingButDifferentlyTimedConcurrentBookingsSucceedsForSameDoctor() throws Exception {
+        Specialty specialty = fixtures.createSpecialty();
+        fixtures.createDoctor(specialty);
+        fixtures.createRoom();
+        fixtures.createRoom();
+        Patient patient = fixtures.createPatient();
+
+        // Fixed mid-day hour, not truncatedTo(HOURS) on "now" — this test needs
+        // 90 minutes of same-day headroom, which a late-evening "now" wouldn't have.
+        OffsetDateTime baseStart = OffsetDateTime.now().plus(Duration.ofDays(2))
+                .withHour(10).withMinute(0).withSecond(0).withNano(0);
+        // [baseStart, +60min) and [baseStart+30min, +90min) overlap by 30 minutes.
+        CreateAppointmentRequest requestA = new CreateAppointmentRequest(
+                patient.getPatientId(), specialty.getCode(), baseStart.toLocalDate(),
+                baseStart.toLocalTime(), baseStart.getOffset(), 60);
+        CreateAppointmentRequest requestB = new CreateAppointmentRequest(
+                patient.getPatientId(), specialty.getCode(), baseStart.toLocalDate(),
+                baseStart.plusMinutes(30).toLocalTime(), baseStart.getOffset(), 60);
+
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+
+        Callable<HttpStatusCode> taskA = () -> {
+            ready.countDown();
+            start.await();
+            return restTemplate.postForEntity("/api/appointments", requestA, String.class).getStatusCode();
+        };
+        Callable<HttpStatusCode> taskB = () -> {
+            ready.countDown();
+            start.await();
+            return restTemplate.postForEntity("/api/appointments", requestB, String.class).getStatusCode();
+        };
+
+        Future<HttpStatusCode> futureA = executor.submit(taskA);
+        Future<HttpStatusCode> futureB = executor.submit(taskB);
+        ready.await();
+        start.countDown();
+
+        HttpStatusCode statusA = futureA.get();
+        HttpStatusCode statusB = futureB.get();
+        executor.shutdown();
+
+        long successCount = Stream.of(statusA, statusB).filter(HttpStatusCode::is2xxSuccessful).count();
+        long conflictCount = Stream.of(statusA, statusB).filter(status -> status.value() == 409).count();
+
+        assertThat(successCount).isEqualTo(1);
+        assertThat(conflictCount).isEqualTo(1);
     }
 }

@@ -218,6 +218,7 @@ Once running:
 ```bash
 curl -X POST http://localhost:8080/api/appointments \
   -H "Content-Type: application/json" \
+  -H "Idempotency-Key: $(uuidgen)" \
   -d '{
     "patientId": "PAT-0001",
     "specialtyCode": "CARDIOLOGY",
@@ -235,6 +236,13 @@ the database row id, and an unknown one returns 404. The resulting instant
 15-minute multiple between 15 and 480 (8 hours), and can't push the
 appointment past midnight. See **Seeding data** below for how to get
 specialties/doctors/rooms/patients into a fresh database.
+
+The `Idempotency-Key` header is optional but recommended: if a client never
+sees the response (dropped connection, timeout) and retries with the same
+key, it gets back the original response instead of risking a second
+booking. Deliberately simplified — only successful bookings are replayed,
+a reused key isn't checked against the request body, and the store is
+in-memory (per-instance, 24h TTL). See DECISIONS.md #026.
 
 Omit `startTime` to let the system pick a time itself, within extended
 business hours (9am–6pm that day) — it searches for a free doctor+room+time
@@ -347,3 +355,8 @@ reachable — point `spring.datasource.*`, `app.integrations.room-reservation.ba
   are synchronous and both can fail the booking (409 on rejection, 503 if
   the availability check itself can't be reached from the preview endpoint).
   See DECISIONS.md #021.
+- **In-memory-only caching/dedup**: the room-availability cache and the
+  idempotency-key store are both plain in-memory maps — correct for a
+  single instance, but wouldn't dedupe across a multi-instance deployment.
+  A shared store (Redis, or the DB) would be needed there. See
+  DECISIONS.md #026.

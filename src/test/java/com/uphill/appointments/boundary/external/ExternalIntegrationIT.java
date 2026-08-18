@@ -1,5 +1,6 @@
 package com.uphill.appointments.boundary.external;
 
+import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
 import static com.github.tomakehurst.wiremock.client.WireMock.created;
 import static com.github.tomakehurst.wiremock.client.WireMock.delete;
 import static com.github.tomakehurst.wiremock.client.WireMock.deleteRequestedFor;
@@ -18,6 +19,7 @@ import java.time.OffsetDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.stream.StreamSupport;
 
 import org.apache.kafka.clients.consumer.ConsumerConfig;
@@ -33,6 +35,8 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.resttestclient.TestRestTemplate;
 import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureTestRestTemplate;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.kafka.test.utils.KafkaTestUtils;
@@ -264,8 +268,48 @@ class ExternalIntegrationIT {
         assertThat(dayOnlyResponse.getBody().startsAt()).isAfterOrEqualTo(morningStart.plusMinutes(180));
     }
 
+    @Test
+    void bookingFailsOverWhenRoomReservationCallHangsPastReadTimeout() {
+        // Read timeout is 3s (app.integrations.room-reservation.read-timeout-ms);
+        // a 4s delay should trip it rather than hang the request indefinitely.
+        wireMock.stubFor(post(urlPathMatching("/rooms/.*/reservations"))
+                .willReturn(aResponse().withStatus(201).withFixedDelay(4000)));
+
+        ResponseEntity<String> response =
+                restTemplate.postForEntity("/api/appointments", sampleRequest(), String.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+    }
+
+    @Test
+    void repeatedIdempotencyKeyCreatesOnlyOneAppointment() {
+        wireMock.stubFor(post(urlPathMatching("/rooms/.*/reservations")).willReturn(created()));
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("Idempotency-Key", "test-key-" + UUID.randomUUID());
+        HttpEntity<CreateAppointmentRequest> requestEntity = new HttpEntity<>(sampleRequest(), headers);
+
+        ResponseEntity<AppointmentResponse> first =
+                restTemplate.postForEntity("/api/appointments", requestEntity, AppointmentResponse.class);
+        ResponseEntity<AppointmentResponse> second =
+                restTemplate.postForEntity("/api/appointments", requestEntity, AppointmentResponse.class);
+
+        assertThat(first.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(second.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(second.getBody().id()).isEqualTo(first.getBody().id());
+        wireMock.verify(1, postRequestedFor(urlPathMatching("/rooms/.*/reservations")));
+    }
+
+    // RoomAvailabilityService caches per-day (30s TTL, see #026) and is a Spring
+    // singleton shared across every test method in this class — a fixed date
+    // would let one test's cached room id leak into another test's differently
+    // -fixtured room. Each call gets its own day so tests never collide.
+    private static final java.util.concurrent.atomic.AtomicInteger SAMPLE_DAY_OFFSET =
+            new java.util.concurrent.atomic.AtomicInteger(3);
+
     private CreateAppointmentRequest sampleRequest() {
-        OffsetDateTime startsAt = OffsetDateTime.now().plus(Duration.ofDays(3)).truncatedTo(ChronoUnit.HOURS);
+        OffsetDateTime startsAt = OffsetDateTime.now()
+                .plus(Duration.ofDays(SAMPLE_DAY_OFFSET.getAndIncrement()))
+                .truncatedTo(ChronoUnit.HOURS);
         return new CreateAppointmentRequest(
                 patient.getPatientId(), specialty.getCode(), startsAt.toLocalDate(),
                 startsAt.toLocalTime(), startsAt.getOffset(), null);

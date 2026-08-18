@@ -57,6 +57,7 @@ public class BookingService {
     static final LocalTime WINDOW_START = LocalTime.of(9, 0);
     static final LocalTime WINDOW_END = LocalTime.of(18, 0);
     private static final int MAX_BOOKING_ATTEMPTS = 20;
+    private static final int CONSECUTIVE_ROOM_FAILURE_THRESHOLD = 3;
 
     private final SpecialtyRepository specialtyRepository;
     private final DoctorRepository doctorRepository;
@@ -159,7 +160,8 @@ public class BookingService {
         try {
             rooms = roomAvailabilityService.availableRoomsOn(window.start().toLocalDate());
         } catch (RoomAvailabilityCheckFailedException e) {
-            throw new AppointmentAllocationException("Unable to determine room availability: " + e.getMessage());
+            log.warn("Room availability check failed for {}", window.start().toLocalDate(), e);
+            throw new AppointmentAllocationException("Unable to determine room availability: " + e.getMessage(), e);
         }
         List<Long> roomIds = rooms.stream().map(Room::getId).toList();
 
@@ -219,8 +221,9 @@ public class BookingService {
     private Appointment tryBookCandidates(
             List<Candidate> candidates, Specialty specialty, Patient patient, String exhaustedMessage) {
         int attempts = 0;
+        int consecutiveRoomFailures = 0;
         for (Candidate candidate : candidates) {
-            if (attempts >= MAX_BOOKING_ATTEMPTS) {
+            if (attempts >= MAX_BOOKING_ATTEMPTS || consecutiveRoomFailures >= CONSECUTIVE_ROOM_FAILURE_THRESHOLD) {
                 break;
             }
             attempts++;
@@ -229,9 +232,12 @@ public class BookingService {
                         candidate.startsAt(), candidate.endsAt());
             } catch (DataIntegrityViolationException lostRace) {
                 // Another request took this doctor or room for this slot first — routine, silent.
+                // Not evidence of external trouble, so it doesn't count toward the failure streak.
+                consecutiveRoomFailures = 0;
             } catch (RoomReservationFailedException roomFailure) {
                 // Worth a log line (unlike a routine DB race): the external room system
                 // rejecting/erroring is an operational signal, not expected noise.
+                consecutiveRoomFailures++;
                 log.warn(
                         "Room {} reservation failed for specialty {} at {}, trying next candidate",
                         candidate.room().getId(), specialty.getCode(), candidate.startsAt(), roomFailure);
@@ -267,7 +273,8 @@ public class BookingService {
         try {
             rooms = roomAvailabilityService.availableRoomsOn(startsAt.toLocalDate());
         } catch (RoomAvailabilityCheckFailedException e) {
-            throw new AppointmentAllocationException("Unable to determine room availability: " + e.getMessage());
+            log.warn("Room availability check failed for {}", startsAt.toLocalDate(), e);
+            throw new AppointmentAllocationException("Unable to determine room availability: " + e.getMessage(), e);
         }
         List<Long> roomIds = rooms.stream().map(Room::getId).toList();
         Set<Long> booked = roomIds.isEmpty()

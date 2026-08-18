@@ -708,3 +708,65 @@ documenting that gap explicitly rather than pretending it's covered.
 9am–6pm that day, `bookOnDay` throws `AppointmentAllocationException` (409)
 even if the same doctor/room/day would work outside that window via an
 explicit `startTime`.
+
+### 026 — Booking/room error-handling hardening (six items, worked through one at a time)
+A code-review pass over the room/booking flow surfaced six resilience/
+observability gaps. Each was discussed and decided individually before any
+code changed; recorded together since they're small and touch overlapping
+files.
+
+- **Cause chain preserved, and logged.** `AppointmentAllocationException`
+  gained a `(message, cause)` constructor; both places `BookingService`
+  catches `RoomAvailabilityCheckFailedException` now `log.warn(..., e)`
+  before rethrowing with the cause attached. Previously the external
+  system's actual failure reason was invisible in the logs — every outage
+  looked identical to genuine capacity exhaustion.
+- **409 stays for booking, on purpose.** Considered switching booking to
+  503 for this same failure (matching the preview endpoint), same as #021's
+  reasoning — decided against it: the logging fix above closes the real
+  gap (an operator can now tell the cause from the logs), and changing the
+  booking endpoint's status code is a bigger client-facing contract change
+  than the problem warranted. The preview endpoint keeps 503, since there
+  the distinction from a 409 is the entire point of that endpoint's
+  response.
+- **Explicit timeouts on the room-reservation `RestClient`**: 2s connect /
+  3s read, via new `app.integrations.room-reservation.connect-timeout-ms`
+  / `read-timeout-ms` properties — matching the fail-fast philosophy
+  already applied to Kafka's `max.block.ms`/`request.timeout.ms`. Without
+  this, a *hanging* (not just erroring) external system blocked the
+  request thread indefinitely; a `RestClient` config that never explicitly
+  chose a timeout was effectively choosing "forever."
+- **Fail-fast streak, not a circuit breaker.** `tryBookCandidates` now
+  tracks consecutive `RoomReservationFailedException`s and stops after 3
+  in a row (`CONSECUTIVE_ROOM_FAILURE_THRESHOLD`), instead of always
+  burning through `MAX_BOOKING_ATTEMPTS`. A `DataIntegrityViolationException`
+  (routine DB race) resets the streak — it's not evidence the external
+  system is in trouble. Considered resilience4j for a real circuit breaker
+  (state shared across requests, half-open recovery); decided a few lines
+  of in-method bookkeeping was proportionate to the actual problem
+  (one booking attempt wasting time against a fully-down system), and a
+  new dependency for that felt like solving a bigger problem than exists
+  at this scale.
+- **30-second TTL cache on the day-availability external call.**
+  `RoomAvailabilityService` now caches `findAvailableRoomIds(date)` results
+  in a plain `ConcurrentHashMap<LocalDate, CachedEntry>` — no caching
+  library (Caffeine/spring-cache) added for one method; the manual-map
+  style already established for this kind of thing (see the idempotency
+  store below) was reused instead. Only successful results are cached, so
+  a failure doesn't get masked behind a 30-second window — the next call
+  retries the external system immediately. In-memory, so this only
+  dedupes within a single instance.
+- **Client-supplied `Idempotency-Key` header on booking.** New
+  `boundary/api/idempotency/IdempotencyKeyStore` (24-hour TTL, same
+  manual-map style as the cache above) lets a client retry
+  `POST /api/appointments` after not seeing the first response without
+  risking a double booking — a repeated key replays the stored response
+  instead of calling `BookingService` again. Deliberately narrow, matching
+  the actual reported gap rather than building general distributed
+  idempotency: only successful (201) responses are stored, since a failed
+  attempt didn't create anything and is already safe to just retry; a
+  reused key isn't checked against the original request body; two truly
+  simultaneous requests carrying the same brand-new key can still both
+  execute (no locking/coalescing) — this closes "client retried because it
+  never saw the response," not every conceivable race. In-memory, same
+  single-instance caveat as the availability cache.

@@ -3,6 +3,8 @@ package com.uphill.appointments.control;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.time.Duration;
@@ -217,11 +219,41 @@ class BookingServiceTest {
         when(doctorRepository.findBySpecialtyAndActiveTrue(cardiology)).thenReturn(List.of(drA));
         when(doctorScheduleRepository.findByDoctorIdInAndDayOfWeek(any(), any())).thenReturn(List.of(fullDaySchedule(drA)));
         when(appointmentRepository.findBookedDoctorIdsOverlapping(any(), any(), any())).thenReturn(List.of());
+        RoomAvailabilityCheckFailedException cause =
+                new RoomAvailabilityCheckFailedException("external system down", new RuntimeException());
+        when(roomAvailabilityService.availableRoomsOn(any())).thenThrow(cause);
+
+        assertThatThrownBy(() -> bookingService.book("CARDIOLOGY", "PAT-0001", startsAt, null))
+                .isInstanceOf(AppointmentAllocationException.class)
+                .hasCause(cause);
+    }
+
+    @Test
+    void stopsRetryingAfterThreeConsecutiveRoomReservationFailures() {
+        Room room3 = new Room();
+        room3.setId(22L);
+        room3.setActive(true);
+        Room room4 = new Room();
+        room4.setId(23L);
+        room4.setActive(true);
+        Room room5 = new Room();
+        room5.setId(24L);
+        room5.setActive(true);
+        when(specialtyRepository.findByCode("CARDIOLOGY")).thenReturn(Optional.of(cardiology));
+        when(patientRepository.findByPatientId("PAT-0001")).thenReturn(Optional.of(patient));
+        when(doctorRepository.findBySpecialtyAndActiveTrue(cardiology)).thenReturn(List.of(drA));
+        when(doctorScheduleRepository.findByDoctorIdInAndDayOfWeek(any(), any())).thenReturn(List.of(fullDaySchedule(drA)));
         when(roomAvailabilityService.availableRoomsOn(any()))
-                .thenThrow(new RoomAvailabilityCheckFailedException("external system down", new RuntimeException()));
+                .thenReturn(List.of(room1, room2, room3, room4, room5));
+        when(appointmentRepository.findBookedDoctorIdsOverlapping(any(), any(), any())).thenReturn(List.of());
+        when(appointmentRepository.findBookedRoomIdsOverlapping(any(), any(), any())).thenReturn(List.of());
+        when(bookingAttemptExecutor.attemptBook(any(), any(), any(), any(), any(), any()))
+                .thenThrow(new RoomReservationFailedException("room rejected", new RuntimeException()));
 
         assertThatThrownBy(() -> bookingService.book("CARDIOLOGY", "PAT-0001", startsAt, null))
                 .isInstanceOf(AppointmentAllocationException.class);
+
+        verify(bookingAttemptExecutor, times(3)).attemptBook(any(), any(), any(), any(), any(), any());
     }
 
     @Test

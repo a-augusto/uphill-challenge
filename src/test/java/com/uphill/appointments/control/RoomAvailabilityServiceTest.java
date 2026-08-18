@@ -2,6 +2,8 @@ package com.uphill.appointments.control;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.time.LocalDate;
@@ -40,6 +42,21 @@ class RoomAvailabilityServiceTest {
         List<Room> result = roomAvailabilityService.availableRoomsOn(date);
 
         assertThat(result).containsExactly(room1);
+    }
+
+    @Test
+    void cachesExternalResultWithinTtlWindow() {
+        roomAvailabilityService = new RoomAvailabilityService(roomRepository, roomReservationClient);
+        Room room1 = new Room();
+        room1.setId(1L);
+        LocalDate date = LocalDate.now().plusDays(1);
+        when(roomRepository.findByActiveTrue()).thenReturn(List.of(room1));
+        when(roomReservationClient.findAvailableRoomIds(date)).thenReturn(List.of(1L));
+
+        roomAvailabilityService.availableRoomsOn(date);
+        roomAvailabilityService.availableRoomsOn(date);
+
+        verify(roomReservationClient, times(1)).findAvailableRoomIds(date);
     }
 
     @Test

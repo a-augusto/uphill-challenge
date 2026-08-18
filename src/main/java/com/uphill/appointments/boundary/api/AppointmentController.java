@@ -30,6 +30,8 @@ import com.uphill.appointments.entity.repository.AppointmentRepository;
 import com.uphill.appointments.entity.repository.AppointmentSpecifications;
 
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.Parameters;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 
@@ -47,7 +49,11 @@ public class AppointmentController {
             + "same response for a repeated key instead of booking again.")
     @PostMapping("/api/appointments")
     public ResponseEntity<AppointmentResponse> create(
-            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @RequestHeader(value = "Idempotency-Key", required = false)
+            @Parameter(example = "5b1b3f3a-6e0a-4b8a-9c1e-2a7f6b0d1c3e",
+                    description = "Optional — replays the original response for a repeated key instead of "
+                            + "booking again")
+            String idempotencyKey,
             @Valid @RequestBody CreateAppointmentRequest request) {
         if (idempotencyKey != null) {
             Optional<IdempotencyKeyStore.StoredResponse> cached = idempotencyKeyStore.get(idempotencyKey);
@@ -79,18 +85,37 @@ public class AppointmentController {
             + "stopping someone who merely learned the appointment id from cancelling someone else's booking.")
     @PostMapping("/api/appointments/{id}/cancel")
     public ResponseEntity<AppointmentResponse> cancel(
-            @PathVariable UUID id, @RequestParam String patientId) {
+            @PathVariable
+            @Parameter(example = "79051f77-13c7-454a-9760-dbacadb66efb")
+            UUID id,
+            @RequestParam
+            @Parameter(example = "PAT-000001", description = "Must match the patientId the appointment was "
+                    + "booked under, or this returns 404 the same as an unknown id")
+            String patientId) {
         Appointment appointment = cancellationService.cancel(id, patientId);
         return ResponseEntity.ok(AppointmentResponse.from(appointment));
     }
 
     @Operation(summary = "List scheduled appointments (admin)")
+    @Parameters({
+            @Parameter(name = "page", example = "0", description = "Zero-based page index"),
+            @Parameter(name = "size", example = "20", description = "Page size, capped at 100 (see application.properties)"),
+            @Parameter(name = "sort", example = "startsAt,desc", description = "Optional — property,(asc|desc), repeatable")
+    })
     @GetMapping("/api/appointments")
     public Page<AppointmentResponse> list(
-            @RequestParam(required = false) String specialty,
-            @RequestParam(required = false) OffsetDateTime from,
-            @RequestParam(required = false) OffsetDateTime to,
-            Pageable pageable) {
+            @RequestParam(required = false)
+            @Parameter(example = "CARDIOLOGY",
+                    description = "Optional — one of the seeded specialty codes. Leave blank/omit to list every "
+                            + "specialty (no filter is applied)")
+            String specialty,
+            @RequestParam(required = false)
+            @Parameter(example = "2026-08-26T00:00:00Z", description = "Optional — inclusive lower bound on startsAt")
+            OffsetDateTime from,
+            @RequestParam(required = false)
+            @Parameter(example = "2026-08-27T00:00:00Z", description = "Optional — inclusive upper bound on startsAt")
+            OffsetDateTime to,
+            @Parameter(hidden = true) Pageable pageable) {
         Specification<Appointment> spec = Specification.allOf(Stream.of(
                         AppointmentSpecifications.hasSpecialtyCode(specialty),
                         AppointmentSpecifications.startsAtFrom(from),

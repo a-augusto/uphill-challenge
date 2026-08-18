@@ -423,7 +423,7 @@ class BookingServiceTest {
         when(doctorRepository.findBySpecialtyAndActiveTrue(cardiology)).thenReturn(List.of(drA));
         when(doctorScheduleRepository.findByDoctorIdInAndDayOfWeek(any(), any()))
                 .thenReturn(List.of(scheduleFor(drA, date, LocalTime.of(9, 0), LocalTime.of(18, 0))));
-        when(roomAvailabilityService.availableRoomsOn(date)).thenReturn(List.of(room1));
+        when(roomAvailabilityService.availableRoomsOn(any(OffsetDateTime.class))).thenReturn(List.of(room1));
         when(appointmentRepository.findBookedAppointmentsForDoctorsOverlapping(any(), any(), any())).thenReturn(List.of());
         when(appointmentRepository.findBookedAppointmentsForRoomsOverlapping(any(), any(), any())).thenReturn(List.of());
         when(bookingAttemptExecutor.attemptBook(any(), any(), any(), any(), any(), any()))
@@ -453,7 +453,7 @@ class BookingServiceTest {
         when(doctorRepository.findBySpecialtyAndActiveTrue(cardiology)).thenReturn(List.of(drA));
         when(doctorScheduleRepository.findByDoctorIdInAndDayOfWeek(any(), any()))
                 .thenReturn(List.of(scheduleFor(drA, date, LocalTime.of(9, 7), LocalTime.of(18, 0))));
-        when(roomAvailabilityService.availableRoomsOn(date)).thenReturn(List.of(room1));
+        when(roomAvailabilityService.availableRoomsOn(any(OffsetDateTime.class))).thenReturn(List.of(room1));
         when(appointmentRepository.findBookedAppointmentsForDoctorsOverlapping(any(), any(), any())).thenReturn(List.of());
         when(appointmentRepository.findBookedAppointmentsForRoomsOverlapping(any(), any(), any())).thenReturn(List.of());
         when(bookingAttemptExecutor.attemptBook(any(), any(), any(), any(), any(), any()))
@@ -481,7 +481,7 @@ class BookingServiceTest {
         when(doctorRepository.findBySpecialtyAndActiveTrue(cardiology)).thenReturn(List.of(drA));
         when(doctorScheduleRepository.findByDoctorIdInAndDayOfWeek(any(), any()))
                 .thenReturn(List.of(scheduleFor(drA, date, LocalTime.of(9, 0), LocalTime.of(18, 0))));
-        when(roomAvailabilityService.availableRoomsOn(date)).thenReturn(List.of(room1));
+        when(roomAvailabilityService.availableRoomsOn(any(OffsetDateTime.class))).thenReturn(List.of(room1));
         when(appointmentRepository.findBookedAppointmentsForDoctorsOverlapping(any(), any(), any()))
                 .thenReturn(List.of(busyAppointment(drA, room2, nineAm, noon)));
         when(appointmentRepository.findBookedAppointmentsForRoomsOverlapping(any(), any(), any())).thenReturn(List.of());
@@ -508,7 +508,7 @@ class BookingServiceTest {
         when(doctorRepository.findBySpecialtyAndActiveTrue(cardiology)).thenReturn(List.of(drA));
         when(doctorScheduleRepository.findByDoctorIdInAndDayOfWeek(any(), any()))
                 .thenReturn(List.of(scheduleFor(drA, date, LocalTime.of(9, 0), LocalTime.of(9, 15))));
-        when(roomAvailabilityService.availableRoomsOn(date)).thenReturn(List.of(room1));
+        when(roomAvailabilityService.availableRoomsOn(any(OffsetDateTime.class))).thenReturn(List.of(room1));
 
         assertThatThrownBy(() -> bookingService.bookOnDay("CARDIOLOGY", "PAT-0001", date, ZoneOffset.UTC, 30))
                 .isInstanceOf(AppointmentAllocationException.class);
@@ -521,7 +521,7 @@ class BookingServiceTest {
         when(patientRepository.findByPatientId("PAT-0001")).thenReturn(Optional.of(patient));
         when(doctorRepository.findBySpecialtyAndActiveTrue(cardiology)).thenReturn(List.of(drA));
         when(doctorScheduleRepository.findByDoctorIdInAndDayOfWeek(any(), any())).thenReturn(List.of());
-        when(roomAvailabilityService.availableRoomsOn(date)).thenReturn(List.of(room1));
+        when(roomAvailabilityService.availableRoomsOn(any(OffsetDateTime.class))).thenReturn(List.of(room1));
 
         assertThatThrownBy(() -> bookingService.bookOnDay("CARDIOLOGY", "PAT-0001", date, ZoneOffset.UTC, 30))
                 .isInstanceOf(AppointmentAllocationException.class);
@@ -537,7 +537,7 @@ class BookingServiceTest {
         when(doctorRepository.findBySpecialtyAndActiveTrue(cardiology)).thenReturn(List.of(drA));
         when(doctorScheduleRepository.findByDoctorIdInAndDayOfWeek(any(), any()))
                 .thenReturn(List.of(scheduleFor(drA, date, LocalTime.of(9, 0), LocalTime.of(18, 0))));
-        when(roomAvailabilityService.availableRoomsOn(date)).thenReturn(List.of(room1));
+        when(roomAvailabilityService.availableRoomsOn(any(OffsetDateTime.class))).thenReturn(List.of(room1));
         when(appointmentRepository.findBookedAppointmentsForDoctorsOverlapping(any(), any(), any()))
                 .thenReturn(List.of(busyAppointment(drA, room1, nineAm, sixPm)));
         when(appointmentRepository.findBookedAppointmentsForRoomsOverlapping(any(), any(), any())).thenReturn(List.of());

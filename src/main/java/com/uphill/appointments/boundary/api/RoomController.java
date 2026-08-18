@@ -1,6 +1,6 @@
 package com.uphill.appointments.boundary.api;
 
-import java.time.LocalDate;
+import java.time.OffsetDateTime;
 import java.util.List;
 
 import org.springframework.web.bind.annotation.GetMapping;
@@ -21,7 +21,7 @@ public class RoomController {
 
     @Operation(summary = "Preview which rooms the external system reports as available on a given day")
     @GetMapping("/api/rooms/availability")
-    public List<RoomAvailabilityResponse> availability(@RequestParam LocalDate date) {
+    public List<RoomAvailabilityResponse> availability(@RequestParam OffsetDateTime date) {
         return roomAvailabilityService.availableRoomsOn(date).stream()
                 .map(RoomAvailabilityResponse::from)
                 .toList();

@@ -2,7 +2,7 @@ package com.uphill.appointments.control;
 
 import java.time.Duration;
 import java.time.Instant;
-import java.time.LocalDate;
+import java.time.OffsetDateTime;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -42,12 +42,12 @@ public class RoomAvailabilityService {
 
     private final RoomRepository roomRepository;
     private final RoomReservationClient roomReservationClient;
-    private final ConcurrentMap<LocalDate, CachedEntry> cache = new ConcurrentHashMap<>();
+    private final ConcurrentMap<OffsetDateTime, CachedEntry> cache = new ConcurrentHashMap<>();
 
     private record CachedEntry(List<Long> roomIds, Instant fetchedAt) {
     }
 
-    public List<Room> availableRoomsOn(LocalDate date) {
+    public List<Room> availableRoomsOn(OffsetDateTime date) {
         Set<Long> externallyAvailable;
         try {
             externallyAvailable = new HashSet<>(findAvailableRoomIdsCached(date));
@@ -60,7 +60,7 @@ public class RoomAvailabilityService {
                 .toList();
     }
 
-    private List<Long> findAvailableRoomIdsCached(LocalDate date) {
+    private List<Long> findAvailableRoomIdsCached(OffsetDateTime date) {
         CachedEntry cached = cache.get(date);
         if (cached != null && Instant.now().isBefore(cached.fetchedAt().plus(CACHE_TTL))) {
             return cached.roomIds();

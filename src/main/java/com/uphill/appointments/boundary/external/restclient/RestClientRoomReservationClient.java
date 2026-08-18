@@ -1,6 +1,5 @@
 package com.uphill.appointments.boundary.external.restclient;
 
-import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
@@ -21,9 +20,9 @@ public class RestClientRoomReservationClient implements RoomReservationClient {
     }
 
     @Override
-    public List<Long> findAvailableRoomIds(LocalDate date) {
+    public List<Long> findAvailableRoomIds(OffsetDateTime date) {
         AvailableRoomsResponse response = restClient.get()
-                .uri("/rooms/available?date={date}", date)
+                .uri("/rooms/available?date={date}", date.toLocalDate())
                 .retrieve()
                 .body(AvailableRoomsResponse.class);
         return response != null ? response.roomIds() : List.of();

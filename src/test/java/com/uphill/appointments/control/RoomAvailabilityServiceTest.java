@@ -6,7 +6,8 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import java.time.LocalDate;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 
 import com.uphill.appointments.control.exceptions.RoomAvailabilityCheckFailedException;
@@ -36,7 +37,7 @@ class RoomAvailabilityServiceTest {
         room1.setId(1L);
         Room room2 = new Room();
         room2.setId(2L);
-        LocalDate date = LocalDate.now().plusDays(1);
+        OffsetDateTime date = OffsetDateTime.now(ZoneOffset.UTC).plusDays(1);
         when(roomRepository.findByActiveTrue()).thenReturn(List.of(room1, room2));
         when(roomReservationClient.findAvailableRoomIds(date)).thenReturn(List.of(1L));
 
@@ -50,7 +51,7 @@ class RoomAvailabilityServiceTest {
         roomAvailabilityService = new RoomAvailabilityService(roomRepository, roomReservationClient);
         Room room1 = new Room();
         room1.setId(1L);
-        LocalDate date = LocalDate.now().plusDays(1);
+        OffsetDateTime date = OffsetDateTime.now(ZoneOffset.UTC).plusDays(1);
         when(roomRepository.findByActiveTrue()).thenReturn(List.of(room1));
         when(roomReservationClient.findAvailableRoomIds(date)).thenReturn(List.of(1L));
 
@@ -63,7 +64,7 @@ class RoomAvailabilityServiceTest {
     @Test
     void wrapsExternalClientFailureInRoomAvailabilityCheckFailedException() {
         roomAvailabilityService = new RoomAvailabilityService(roomRepository, roomReservationClient);
-        LocalDate date = LocalDate.now().plusDays(1);
+        OffsetDateTime date = OffsetDateTime.now(ZoneOffset.UTC).plusDays(1);
         when(roomReservationClient.findAvailableRoomIds(date)).thenThrow(new RuntimeException("connection refused"));
 
         assertThatThrownBy(() -> roomAvailabilityService.availableRoomsOn(date))

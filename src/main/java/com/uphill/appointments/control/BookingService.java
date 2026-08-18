@@ -179,10 +179,10 @@ public class BookingService {
 
         List<Room> rooms;
         try {
-            rooms = roomAvailabilityService.availableRoomsOn(window.start().toLocalDate());
+            rooms = roomAvailabilityService.availableRoomsOn(window.start());
         } catch (RoomAvailabilityCheckFailedException e) {
             recordBookingFailure("external_check_failed");
-            log.warn("Room availability check failed for {}",window.start().toLocalDate(), e);
+            log.warn("Room availability check failed for {}", window.start(), e);
             throw new AppointmentAllocationException("Unable to determine room availability: " + e.getMessage(), e);
         }
         List<Long> roomIds = rooms.stream().map(Room::getId).toList();
@@ -304,10 +304,10 @@ public class BookingService {
     private List<Room> availableRooms(OffsetDateTime startsAt, OffsetDateTime endsAt) {
         List<Room> rooms;
         try {
-            rooms = roomAvailabilityService.availableRoomsOn(startsAt.toLocalDate());
+            rooms = roomAvailabilityService.availableRoomsOn(startsAt);
         } catch (RoomAvailabilityCheckFailedException e) {
             recordBookingFailure("external_check_failed");
-            log.warn("Room availability check failed for {}",startsAt.toLocalDate(), e);
+            log.warn("Room availability check failed for {}", startsAt, e);
             throw new AppointmentAllocationException("Unable to determine room availability: " + e.getMessage(), e);
         }
         List<Long> roomIds = rooms.stream().map(Room::getId).toList();

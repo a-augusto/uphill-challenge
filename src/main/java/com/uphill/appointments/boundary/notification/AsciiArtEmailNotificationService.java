@@ -51,7 +51,6 @@ public class AsciiArtEmailNotificationService implements NotificationService {
                 EmailSlotFormatter.formatSlot(appointment),
                 appointment.getDoctor().getName(),
                 appointment.getRoom().getName()));
-        log.info("Sent appointment confirmation email for appointment {}", appointment.getId());
     }
 
     @Override
@@ -71,9 +70,17 @@ public class AsciiArtEmailNotificationService implements NotificationService {
                 EmailSlotFormatter.formatSlot(appointment),
                 appointment.getDoctor().getName(),
                 appointment.getRoom().getName()));
-        log.info("Sent appointment cancellation email for appointment {}", appointment.getId());
     }
 
+    /**
+     * Logs the full rendered body at INFO, not just "sent" — the point of
+     * this class existing (ASCII art, dev-only) is a fast local feedback
+     * loop, and checking GreenMail's web UI (localhost:8082) or an IMAP
+     * client for that is slower than just reading the terminal you already
+     * have open. {@link HtmlEmailNotificationService} (prod) doesn't do
+     * this — nobody wants a rendered HTML email dumped into structured JSON
+     * logs, and prod has real inbox access anyway.
+     */
     private void send(Appointment appointment, String subject, String body) {
         SimpleMailMessage message = new SimpleMailMessage();
         message.setFrom(fromAddress);
@@ -81,6 +88,8 @@ public class AsciiArtEmailNotificationService implements NotificationService {
         message.setSubject(subject);
         message.setText(body);
         mailSender.send(message);
+        log.info("Sent '{}' to {} for appointment {}:\n{}",
+                subject, appointment.getPatient().getEmail(), appointment.getId(), body);
     }
 
     /**

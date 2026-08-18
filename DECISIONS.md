@@ -1610,3 +1610,18 @@ appointments at the identical slot, which the new constraint now correctly
 rejects — split into two distinct patients so the test still proves what
 its name says. `BookingServiceTest` gained matching unit coverage for both
 entry points.
+
+### 044 — `AsciiArtEmailNotificationService` logs the actual email body, not just "sent"
+
+Raised during review: to see the ASCII art an email actually rendered as,
+the only option was opening GreenMail's web UI (`localhost:8082`) — slower
+than the terminal already open for everything else, for a class whose whole
+reason to exist is a fast local feedback loop. Fixed by logging the full
+rendered body at INFO alongside the send confirmation, in the one `send(...)`
+both confirmation and cancellation funnel through.
+
+Deliberately only on this class, not `HtmlEmailNotificationService`
+(`prod`) — nobody wants a rendered HTML email dumped into structured JSON
+logs, and prod has real inbox access anyway. Verified live: booked an
+appointment, watched the full box-drawn banner and body land in the console
+without touching GreenMail's UI.

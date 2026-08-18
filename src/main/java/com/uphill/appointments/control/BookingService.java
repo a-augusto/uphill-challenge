@@ -14,6 +14,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import org.springframework.dao.ConcurrencyFailureException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 
@@ -252,9 +253,13 @@ public class BookingService {
             try {
                 return bookingAttemptExecutor.attemptBook(candidate.doctor(), candidate.room(), specialty, patient,
                         candidate.startsAt(), candidate.endsAt());
-            } catch (DataIntegrityViolationException lostRace) {
-                // Another request took this doctor or room for this slot first — routine, silent.
-                // Not evidence of external trouble, so it doesn't count toward the failure streak.
+            } catch (DataIntegrityViolationException | ConcurrencyFailureException lostRace) {
+                // Another request took this doctor or room for this slot first (constraint
+                // violation), or two concurrent inserts deadlocked while both checked the
+                // range-exclusion constraint (ConcurrencyFailureException, e.g. Postgres
+                // "deadlock detected") and Postgres aborted this one — either way, routine,
+                // silent. Not evidence of external trouble, so it doesn't count toward the
+                // failure streak.
                 consecutiveRoomFailures = 0;
             } catch (RoomReservationFailedException roomFailure) {
                 // Worth a log line (unlike a routine DB race): the external room system

@@ -212,20 +212,32 @@ on boot (see `docker-compose.yaml`):
 
 Once running:
 - Swagger UI: `http://localhost:8080/swagger-ui.html`
-- Sent emails (GreenMail web UI): `http://localhost:8082`
-- Grafana (traces/metrics): `http://localhost:3000` (admin/admin) —
+- Sent emails (GreenMail web UI): `http://localhost:8082` — by default
+  (no profile, i.e. `./mvnw spring-boot:run` as above) confirmation/
+  cancellation emails render as plain-text ASCII art; add the `prod`
+  profile (`./mvnw spring-boot:run -Dspring-boot.run.profiles=prod`, or
+  combine with `seed`: `-Dspring-boot.run.profiles=seed,prod`) to switch
+  to the styled HTML templates instead — same `NotificationService`
+  interface, swapped implementation, no other change needed.
+- Grafana (traces/metrics/logs): `http://localhost:3000` (admin/admin) —
   Explore → Tempo for request traces (`service.name = appointments`,
   includes the auto-instrumented room-reservation HTTP call as a child
   span), Explore → Prometheus for business metrics
   (`appointments_booked_total`, `appointments_cancelled_total`,
-  `appointments_booking_failed_total`). Trace/span IDs also show up
-  directly in console log lines once tracing is active — Boot's default
-  correlation pattern, no config needed for that part. Log export to Loki
-  doesn't work yet — see **Known gaps** below.
+  `appointments_booking_failed_total`), Explore → Loki for logs
+  (`{service_name="appointments"}`) — each log line carries a `trace_id`
+  label, so Tempo's "logs for this span" jump and Loki's derived-field link
+  back to Tempo both work. Trace/span IDs also show up directly in console
+  log lines once tracing is active — Boot's default correlation pattern, no
+  config needed for that part.
 - Logging is INFO by default (routine outcomes: bookings, cancellations,
   4xx client errors) with DEBUG-level tracing available for the fine-grained
   stuff (candidate attempts, best-effort dispatch confirmation) — add
   `--logging.level.com.uphill.appointments=DEBUG` to see it locally.
+  Console output is a human-readable pattern by default; the `prod`
+  profile (see above) switches it to structured JSON (Elastic Common
+  Schema, one object per line) instead — same `traceId`/`spanId`
+  correlation either way, just JSON fields instead of console text.
 - Health check: `curl http://localhost:8080/actuator/health`
 
 ### Example request
@@ -367,13 +379,6 @@ reachable — point `spring.datasource.*`, `app.integrations.room-reservation.ba
 
 ## Known gaps / what's next
 
-- **Log export to Loki doesn't work yet** — traces and metrics are both
-  confirmed live in Tempo/Prometheus, but the OTLP logging exporter
-  produces no visible activity (no startup log line unlike the metrics
-  exporter, and Loki's own label API stays empty even after generating
-  volume and waiting past the export interval). Needs further
-  investigation; not blocking traces/metrics, which are the higher-value
-  signals and both work. See DECISIONS.md #028.
 - **No auth** on the admin listing endpoint — out of scope per the spec, but
   the first thing to add before any real traffic. See DECISIONS.md #010.
 - **No durable retry** if a best-effort post-action fails — doctor-calendar
@@ -402,5 +407,8 @@ reachable — point `spring.datasource.*`, `app.integrations.room-reservation.ba
 - **In-memory-only caching/dedup**: the room-availability cache and the
   idempotency-key store are both plain in-memory maps — correct for a
   single instance, but wouldn't dedupe across a multi-instance deployment.
-  A shared store (Redis, or the DB) would be needed there. See
-  DECISIONS.md #026.
+  Redis is the concrete fix (both stores are pure key→value+TTL — a natural
+  fit, and its native expiry would also simplify the manual TTL-sweep logic
+  both classes have today); deliberately not built for this single-instance
+  demo scope, a considered decision rather than an oversight. See
+  DECISIONS.md #026, #034.

@@ -1,0 +1,15 @@
+<configuration>
+    <include resource="org/springframework/boot/logging/logback/base.xml"/>
+
+    <!-- Populated via OpenTelemetryAppender.install(OpenTelemetry) in
+         config.OpenTelemetryLoggingConfig once the SDK bean is up; events
+         logged before that are buffered by the appender itself and replayed,
+         so exact startup ordering here doesn't matter. -->
+    <appender name="OpenTelemetry"
+              class="io.opentelemetry.instrumentation.logback.appender.v1_0.OpenTelemetryAppender">
+    </appender>
+
+    <root level="INFO">
+        <appender-ref ref="OpenTelemetry"/>
+    </root>
+</configuration>

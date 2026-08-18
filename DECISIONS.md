@@ -994,3 +994,186 @@ not a failure — the check explicitly treats 201 and 409 as equally valid
 responses). At ~32 req/s sustained with zero errors, that's roughly
 115,000 requests/hour of *headroom* against a spec asking for "thousands
 per day."
+
+### 031 — Email templating: HTML in `prod`, ASCII art everywhere else
+`NotificationService` (the interface `AppointmentEventListener` already
+depended on) now has two implementations selected by Spring `@Profile`
+instead of one: `AsciiArtEmailNotificationService` (`@Profile("!prod")`,
+active in local/dev/`seed` — everything this codebase runs as today) and
+`HtmlEmailNotificationService` (`@Profile("prod")`, new). No caller
+changes anywhere — the swap is entirely behind the existing interface.
+
+**ASCII art via a computed box-drawer, not hand-aligned text**: a small
+`asciiBox(String... lines)` helper measures the longest line and draws a
+`╔═╗`/`║ ║`/`╚═╝` box around whatever's passed in, so the banner doesn't
+silently misalign the moment the text changes. Still plain
+`SimpleMailMessage`, same as before this step — only the opening banner is
+new.
+
+**HTML via Thymeleaf** (`spring-boot-starter-thymeleaf`, no explicit
+version — parent-BOM-managed like every other starter here). Two
+self-contained templates under `templates/email/` (confirmation,
+cancellation), inline `<style>` in `<head>` rather than per-element inline
+styles — a real production template would inline every style for old-Outlook
+rendering; noted here as a deliberate demo-scope simplification, not an
+oversight. No shared Thymeleaf fragment between the two — for exactly two
+templates, an include is more abstraction than the task needs. Sent via
+`MimeMessageHelper` (`setText(html, true)`) instead of `SimpleMailMessage`.
+
+`EmailSlotFormatter` (new, small static utility) pulled the existing pt-PT/
+`Europe/Lisbon` slot-formatting logic out of the one prior class into a
+spot both new classes use identically — genuine current-need reuse, not a
+speculative abstraction (both classes need this today, not hypothetically).
+
+**Found and fixed a real concurrency bug while verifying, unrelated to the
+email change itself**: `BookingConcurrencyIT` failed under a fresh
+`./mvnw clean verify` — not the same test as the once-flaky midnight-crossing
+case from earlier (that fix, a fixed mid-day hour, is still intact and
+unrelated). This was `onlyAsManyConcurrentBookingsSucceedAsDoctorCapacityAllows`
+(10 concurrent requests, doctor capacity 2): 8 of 10 came back as neither
+success nor 409 conflict. The Postgres log showed why —
+`ERROR: deadlock detected ... while checking exclusion constraint` — two
+concurrent inserts can genuinely deadlock against each other while
+Postgres checks the range-exclusion constraint (`excl_doctor_overlap`),
+which is real, expected Postgres behavior under concurrent writes to an
+exclusion-constrained table, not a test artifact. `BookingService` only
+caught `DataIntegrityViolationException` as "lost the race, try the next
+candidate" — a genuine deadlock throws `ConcurrencyFailureException`
+(`CannotAcquireLockException`) instead, a sibling branch of the Spring
+`DataAccessException` hierarchy, not a subtype, so it wasn't caught and
+surfaced as an unhandled 500 instead of being retried. Fixed by catching
+both exception types identically in `tryBookCandidates` — a deadlock loss
+is exactly as routine as a constraint-violation loss, both just mean
+"someone else got there first, try the next candidate." Added a unit test
+(`retriesNextPairWhenFirstAttemptDeadlocksOnExclusionConstraint`) mirroring
+the existing constraint-violation retry test. Reran `./mvnw clean verify`
+against a fresh Postgres afterward: fully green, including
+`BookingConcurrencyIT`.
+
+**Also fixed while verifying**: `AsciiArtEmailNotificationServiceIT`'s new
+banner assertion (`assertThat(body).contains("╔")`) failed —
+`GreenMailUtil.getBody(MimeMessage)` returns the raw, *undecoded*
+wire-format MIME body, and JavaMail quoted-printable-encodes the non-ASCII
+box-drawing characters when no explicit UTF-8 default encoding is
+configured, so the raw body actually contained `=E2=95=94...`. Not an
+application bug — a real mail client decodes this transparently, and the
+sibling `HtmlEmailNotificationServiceIT` (same GreenMail approach) never
+hit this because none of its assertions touch non-ASCII text. Fixed the
+test, not the app: `(String) mimeMessage.getContent()` decodes
+transfer-encoding properly, unlike `GreenMailUtil.getBody`.
+
+**Deferred, flagged not forgotten**: structured/JSON log format for
+`prod` (see #029) — this step introduces the profile #029 was waiting on,
+but adding the log-format change wasn't asked for here, so it stays a
+follow-up rather than a side effect of this change.
+
+### 032 — Structured JSON logging for `prod`, closing the #029/#031 loop
+New `application-prod.properties` (the project's first profile-specific
+config file — everything else so far only used `@Profile` for bean
+selection, not `application-{profile}.properties`), one line:
+`logging.structured.format.console=ecs`. Human-readable console pattern in
+the base `application.properties` stays untouched for local/dev — this
+only changes what `prod` sees.
+
+**Elastic Common Schema over the other two built-in options** (`gelf`,
+`logstash` — confirmed by inspecting `CommonStructuredLogFormat`'s
+constant pool in the Boot 4.0.7 jar directly rather than guessing, same
+discipline as #028/#030): GELF is Graylog-specific, Logstash format is
+tied to the Elastic/Logstash pipeline shape; ECS is the more vendor-neutral
+schema of the three and plays fine with any JSON-aware log shipper,
+including a future Loki pipeline (still the #028 known gap).
+
+**Verified live**: `-Dspring-boot.run.profiles=seed,prod` — console output
+switched to one JSON object per line, `service.name` correctly defaulted
+from `spring.application.name` (already set), and Micrometer Tracing's
+`traceId`/`spanId` fields are still present on every request-thread log
+line (confirmed on a real booking's `BookingAttemptExecutor` and
+`HtmlEmailNotificationService` lines sharing one trace ID) — the
+trace/log correlation from #028 survives the format switch, just as JSON
+fields instead of console-pattern text. Ran a full `./mvnw clean verify`
+afterward against a fresh Postgres to confirm the profile-specific file
+doesn't affect the default (no-profile) test/dev logging path: unaffected,
+fully green.
+
+### 033 — Closed the Loki gap: Logback wasn't actually bridged to the OTel SDK
+#028 flagged "log export to Loki doesn't work yet." Investigated properly
+this time instead of re-guessing at config: the OTel Collector side was
+already fine (its bundled pipeline correctly routes an `otlp` logs receiver
+to Loki, no startup errors) and `management.opentelemetry.logging.export.otlp.endpoint`
+was already set correctly — but `curl .../loki/api/v1/labels` came back
+with zero labels, meaning nothing had ever reached Loki, not just been
+misrouted.
+
+**Root cause**, found by inspecting the actual `spring-boot-opentelemetry`
+4.0.7 jar's class list rather than assuming: that starter only builds the
+OTel SDK `LoggerProvider` bean and its OTLP exporter
+(`OtlpLoggingAutoConfiguration`). Neither it nor core `spring-boot` contains
+any class that attaches Logback to that `LoggerProvider` - there's no
+bridge. Logback events never entered the OTel SDK in the first place, so
+the exporter had nothing to send. This needs a separate instrumentation
+library plus an explicit appender + install call - Boot's starter wires
+the *destination*, not the *source*.
+
+**Fix**: added `io.opentelemetry.instrumentation:opentelemetry-logback-appender-1.0:2.16.0-alpha`
+(confirmed against Maven Central directly - not part of Spring's managed
+BOM like every other OTel jar here, so version-pinned explicitly). Verified
+compatibility rather than assumed it: this project resolves
+`opentelemetry-api`/`opentelemetry-sdk` `1.55.0`; the appender's pom
+declares `opentelemetry-api:1.50.0` as its own dependency, older, and the
+OTel API team maintains strict 1.x backward compatibility, so the
+project's BOM-managed 1.55.0 wins mediation safely. New
+`logback-spring.xml` (project had no custom Logback config before this) -
+`<include resource="org/springframework/boot/logging/logback/base.xml"/>`
+re-declares Boot's own `CONSOLE`/`FILE` appenders (so console output,
+including #032's `prod`-profile JSON format, is untouched), plus a second
+`<root>` block adding the new `OpenTelemetryAppender` - Logback's
+`appender-ref` action is additive per logger regardless of which `<root>`
+block it's declared in, so this doesn't replace the include's root, it
+extends it. New `config.OpenTelemetryLoggingConfig`
+(`ApplicationListener<ApplicationReadyEvent>`) calls
+`OpenTelemetryAppender.install(openTelemetry)` once the SDK bean exists;
+the appender buffers and replays anything logged before that point, so
+exact timing isn't critical. Deliberately not gated behind `prod` (unlike
+#032's JSON format switch) - tracing and metrics export are already
+profile-agnostic, always on whenever `grafana-lgtm` is up, so log export
+follows the same rule for consistency; it's a separate concern from
+console *format*.
+
+**Verified live, before/after**: booked a request, queried Loki through
+Grafana's datasource proxy
+(`/api/datasources/proxy/uid/loki/loki/api/v1/labels` and `.../query_range`)
+- before the fix, zero labels; after, real log lines with `service_name`,
+`severity_text`, and (on request-thread lines) `trace_id` populated. That
+`trace_id` label is what makes Grafana's already-configured Loki→Tempo
+derived field actually functional - the real payoff, not just "logs show
+up somewhere." Also ran `./mvnw clean verify` against a fresh Postgres to
+confirm the new dependency/config doesn't affect slice tests that never
+load the OTel auto-config, or break the `@SpringBootTest` ITs that do:
+unaffected, fully green.
+
+### 034 — In-memory-only caching/dedup stays in-memory: a deliberate business decision
+`IdempotencyKeyStore` and `RoomAvailabilityService`'s cache (see #026) are
+both plain `ConcurrentHashMap`s — correct on a single instance, silently
+wrong the moment a second instance runs behind a load balancer (each
+instance dedupes/caches independently, so a retried request or a cached
+availability check can land on either one).
+
+**The fix, if built**: Redis. Both stores are exactly key→value+TTL, no
+relations, no queries beyond point lookups — `spring-boot-starter-data-redis`
+(Lettuce) plus a `redis` service in `docker-compose.yaml`, matching this
+project's existing convention of explicit, non-auto-discovered service
+wiring for every other integration. Redis's native `SETEX` expiry would
+also replace the manual expiry-sweep logic both classes have today
+(`IdempotencyKeyStore.put`'s `removeIf`, `RoomAvailabilityService`'s
+manual `Instant`-based TTL check) — a net simplification, not just a
+distribution fix. Considered and rejected reusing Postgres instead: worse
+semantic fit for ephemeral cache-shaped data (no native TTL, would need a
+scheduled cleanup job, pollutes the relational schema with rows that carry
+no relational meaning).
+
+**Not built**: this is a single-instance demo scope; adding a sixth
+docker-compose service (already: postgres, wiremock, kafka, greenmail,
+grafana-lgtm) for a problem that only exists once you run 2+ instances is
+premature here. Recorded as a deliberate, considered decision rather than
+an oversight — flagged in README's known gaps with the concrete fix named,
+so it's a five-minute change when it's actually needed, not a rediscovery.

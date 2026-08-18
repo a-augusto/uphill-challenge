@@ -21,6 +21,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.CannotAcquireLockException;
 import org.springframework.dao.DataIntegrityViolationException;
 
 import com.uphill.appointments.entity.Appointment;
@@ -149,6 +150,30 @@ class BookingServiceTest {
         when(appointmentRepository.findBookedRoomIdsOverlapping(any(), any(), any())).thenReturn(List.of());
         when(bookingAttemptExecutor.attemptBook(any(), any(), any(), any(), any(), any()))
                 .thenThrow(new DataIntegrityViolationException("unique violation"))
+                .thenAnswer(inv -> {
+                    Appointment appointment = new Appointment();
+                    appointment.setDoctor(inv.getArgument(0));
+                    appointment.setRoom(inv.getArgument(1));
+                    return appointment;
+                });
+
+        Appointment result = bookingService.book("CARDIOLOGY", "PAT-0001", startsAt, null);
+
+        assertThat(result).isNotNull();
+    }
+
+    @Test
+    void retriesNextPairWhenFirstAttemptDeadlocksOnExclusionConstraint() {
+        when(specialtyRepository.findByCode("CARDIOLOGY")).thenReturn(Optional.of(cardiology));
+        when(patientRepository.findByPatientId("PAT-0001")).thenReturn(Optional.of(patient));
+        when(doctorRepository.findBySpecialtyAndActiveTrue(cardiology)).thenReturn(List.of(drA, drB));
+        when(doctorScheduleRepository.findByDoctorIdInAndDayOfWeek(any(), any()))
+                .thenReturn(List.of(fullDaySchedule(drA), fullDaySchedule(drB)));
+        when(roomAvailabilityService.availableRoomsOn(any())).thenReturn(List.of(room1, room2));
+        when(appointmentRepository.findBookedDoctorIdsOverlapping(any(), any(), any())).thenReturn(List.of());
+        when(appointmentRepository.findBookedRoomIdsOverlapping(any(), any(), any())).thenReturn(List.of());
+        when(bookingAttemptExecutor.attemptBook(any(), any(), any(), any(), any(), any()))
+                .thenThrow(new CannotAcquireLockException("deadlock detected"))
                 .thenAnswer(inv -> {
                     Appointment appointment = new Appointment();
                     appointment.setDoctor(inv.getArgument(0));

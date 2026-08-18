@@ -1,11 +1,9 @@
 package com.uphill.appointments.boundary.notification;
 
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
-import java.time.format.FormatStyle;
-import java.util.Locale;
+import java.util.Arrays;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Profile;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.stereotype.Service;
@@ -15,30 +13,32 @@ import com.uphill.appointments.entity.Appointment;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * Sends confirmation/cancellation emails via {@link JavaMailSender}. Locally
- * and in tests this points at a fake SMTP server (GreenMail); in production
- * it would point at the real relay/SES/SendGrid SMTP endpoint. The code path
- * is real either way — only the target server differs by config.
+ * Sends confirmation/cancellation emails as plain text via
+ * {@link JavaMailSender} — the default outside the {@code prod} profile
+ * (local dev, {@code seed}, tests), where a real HTML inbox rendering
+ * doesn't matter and a bit of ASCII-art flair beats a bare "Hi %s,". See
+ * {@link HtmlEmailNotificationService} for the {@code prod} counterpart.
+ * Locally and in tests this points at a fake SMTP server (GreenMail); the
+ * code path is real either way, only the target server differs by config.
  */
 @Service
+@Profile("!prod")
 @Slf4j
-public class EmailNotificationService implements NotificationService {
-
-    private static final DateTimeFormatter DATE_TIME_FORMATTER =
-            DateTimeFormatter.ofLocalizedDateTime(FormatStyle.MEDIUM, FormatStyle.SHORT).withLocale(Locale.of("pt", "PT"));
-    private static final ZoneId LISBON = ZoneId.of("Europe/Lisbon");
+public class AsciiArtEmailNotificationService implements NotificationService {
 
     private final JavaMailSender mailSender;
     private final String fromAddress;
 
-    public EmailNotificationService(JavaMailSender mailSender, @Value("${app.mail.from}") String fromAddress) {
+    public AsciiArtEmailNotificationService(JavaMailSender mailSender, @Value("${app.mail.from}") String fromAddress) {
         this.mailSender = mailSender;
         this.fromAddress = fromAddress;
     }
 
     @Override
     public void sendAppointmentConfirmation(Appointment appointment) {
-        send(appointment, "Your appointment is confirmed", """
+        String banner = asciiBox("UPHILL HEALTH", "Appointment Confirmed");
+        send(appointment, "Your appointment is confirmed", banner + """
+
                 Hi %s,
 
                 Your appointment has been confirmed for %s.
@@ -48,7 +48,7 @@ public class EmailNotificationService implements NotificationService {
                 See you soon!
                 """.formatted(
                 appointment.getPatient().getName(),
-                formatSlot(appointment),
+                EmailSlotFormatter.formatSlot(appointment),
                 appointment.getDoctor().getName(),
                 appointment.getRoom().getName()));
         log.info("Sent appointment confirmation email for appointment {}", appointment.getId());
@@ -56,7 +56,9 @@ public class EmailNotificationService implements NotificationService {
 
     @Override
     public void sendAppointmentCancellation(Appointment appointment) {
-        send(appointment, "Your appointment has been cancelled", """
+        String banner = asciiBox("UPHILL HEALTH", "Appointment Cancelled");
+        send(appointment, "Your appointment has been cancelled", banner + """
+
                 Hi %s,
 
                 Your appointment for %s has been cancelled.
@@ -66,7 +68,7 @@ public class EmailNotificationService implements NotificationService {
                 If this wasn't you, please get in touch.
                 """.formatted(
                 appointment.getPatient().getName(),
-                formatSlot(appointment),
+                EmailSlotFormatter.formatSlot(appointment),
                 appointment.getDoctor().getName(),
                 appointment.getRoom().getName()));
         log.info("Sent appointment cancellation email for appointment {}", appointment.getId());
@@ -81,7 +83,19 @@ public class EmailNotificationService implements NotificationService {
         mailSender.send(message);
     }
 
-    private static String formatSlot(Appointment appointment) {
-        return DATE_TIME_FORMATTER.format(appointment.getStartsAt().atZoneSameInstant(LISBON));
+    /**
+     * Draws a box around the given lines, sized to the longest one -
+     * computed rather than hand-aligned, so it can't drift out of alignment
+     * if the banner text ever changes.
+     */
+    private static String asciiBox(String... lines) {
+        int width = Arrays.stream(lines).mapToInt(String::length).max().orElse(0);
+        StringBuilder box = new StringBuilder();
+        box.append("╔").append("═".repeat(width + 2)).append("╗\n");
+        for (String line : lines) {
+            box.append("║ ").append(line).append(" ".repeat(width - line.length())).append(" ║\n");
+        }
+        box.append("╚").append("═".repeat(width + 2)).append("╝");
+        return box.toString();
     }
 }

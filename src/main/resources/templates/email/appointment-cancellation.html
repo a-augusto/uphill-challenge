@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8"/>
+    <title>Appointment Cancelled</title>
+    <style>
+        body { margin: 0; padding: 0; background-color: #f4f6f8; font-family: Arial, Helvetica, sans-serif; color: #1f2933; }
+        .container { max-width: 480px; margin: 24px auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; border: 1px solid #e2e8f0; }
+        .header { background-color: #991b1b; color: #ffffff; padding: 20px 24px; }
+        .header h1 { margin: 0; font-size: 18px; letter-spacing: 0.5px; }
+        .status { display: inline-block; margin-top: 8px; padding: 4px 10px; border-radius: 999px; background-color: #fee2e2; color: #991b1b; font-size: 12px; font-weight: bold; }
+        .body { padding: 24px; }
+        .body p { line-height: 1.5; }
+        table.details { width: 100%; border-collapse: collapse; margin: 16px 0; }
+        table.details td { padding: 8px 0; border-bottom: 1px solid #e2e8f0; font-size: 14px; }
+        table.details td.label { color: #6b7280; width: 35%; }
+        table.details td.value { font-weight: bold; }
+        .footer { padding: 16px 24px; font-size: 12px; color: #9ca3af; border-top: 1px solid #e2e8f0; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Uphill Health</h1>
+            <span class="status">CANCELLED</span>
+        </div>
+        <div class="body">
+            <p>Hi <span th:text="${patientName}">Patient Name</span>,</p>
+            <p>Your appointment for <strong th:text="${slot}">the requested slot</strong> has been cancelled.</p>
+            <table class="details">
+                <tr>
+                    <td class="label">Specialty</td>
+                    <td class="value" th:text="${specialty}">Specialty</td>
+                </tr>
+                <tr>
+                    <td class="label">Doctor</td>
+                    <td class="value" th:text="${doctorName}">Doctor Name</td>
+                </tr>
+                <tr>
+                    <td class="label">Room</td>
+                    <td class="value" th:text="${roomName}">Room</td>
+                </tr>
+            </table>
+            <p>If this wasn't you, please get in touch.</p>
+        </div>
+        <div class="footer">
+            This is an automated message from Uphill Health. Please do not reply.
+        </div>
+    </div>
+</body>
+</html>

@@ -1480,3 +1480,52 @@ across three sequential requests showed zero rotation after the fix
 (cookie set once, never reissued). Full headless-Chrome repro of the
 original report - book, book again, cancel - all three now succeed (302,
 not 403). Full `./mvnw clean verify` green.
+
+### 041 — Closed the code-review IDOR finding on `POST /api/appointments/{id}/cancel`
+
+A review pass flagged that the public cancel endpoint took nothing but the
+appointment UUID — no session, no ownership check — so anyone who saw or
+guessed a UUID could cancel a stranger's appointment. Also flagged: the
+admin listing/detail views were paying an N+1 tax (`patient`, `specialty`,
+`doctor`, `room` are all lazy `@ManyToOne`s, read straight off the entity by
+`AppointmentResponse.from`), and neither had a fetch join anywhere. Both
+fixed this pass; a third finding — that a fresh prod deploy boots with zero
+specialties/doctors/rooms unless the `seed` profile is active — was raised
+and explicitly **not** changed: doctors, rooms, and specialty vocabulary are
+reference data a real Uphill Health would own in an upstream HR/scheduling
+system, not something this service invents at boot. `DevDataSeeder`
+(#017) staying dev/demo-only, profile-gated, and clearly labeled as such
+*is* the correct prod posture here, not a gap to close — this service should
+consume that data (a future sync/import concern), never fabricate it.
+
+**N+1 fix**: `AppointmentSpecifications.fetchAssociationsForListing()`,
+combined into both `Specification.allOf(...)` call sites (`GET
+/api/appointments` and the admin page). Left-joins-and-fetches all four
+associations, but only when the query isn't Spring Data's `COUNT(*)`
+pass alongside the page query — fetching there is meaningless and Hibernate
+rejects it on some query shapes anyway. Safe under pagination specifically
+*because* every association here is to-one — a to-many fetch join would
+multiply rows and break the page size contract, but that risk doesn't apply
+to any of these four.
+
+**IDOR fix**: `CancellationService` now has two entry points instead of
+one. `cancel(UUID)` is unchanged, for the authenticated admin UI, which is
+allowed to cancel anything. `cancel(UUID, String patientId)` is new, for the
+public API — the caller must also know the `patientId` the appointment was
+booked under, mirroring how `book(...)` already identifies a patient by that
+same business key rather than a session. A mismatch throws the exact same
+`AppointmentNotFoundException` an unknown UUID would, deliberately: a
+distinct "403 wrong patient" response would confirm the UUID exists and just
+isn't theirs, which is itself information worth not leaking. Low severity in
+practice — UUIDs aren't guessable — but a real gap in a system that's
+supposedly medical, so worth closing rather than leaving as a footnote like
+#010's admin-auth gap was.
+
+**Page-size cap**: `spring.data.web.pageable.max-page-size=100` (Spring
+Data's own default is 2000). `GET /api/appointments?size=99999` now comes
+back clamped to 100 (verified live — response's own `size` field reads
+`100`, not the requested value), instead of the N+1 fix above just changing
+how expensive that one giant query is. `default-page-size=20` alongside it
+purely for symmetry with the admin page's own hardcoded `PAGE_SIZE = 20` —
+that page builds its `PageRequest` directly rather than through this
+resolver, so it was never affected by the missing cap in the first place.

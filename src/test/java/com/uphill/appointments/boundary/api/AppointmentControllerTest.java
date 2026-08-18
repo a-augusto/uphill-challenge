@@ -192,9 +192,10 @@ class AppointmentControllerTest {
         Appointment appointment = sampleAppointment();
         appointment.setStatus(AppointmentStatus.CANCELLED);
         appointment.setCancelledAt(OffsetDateTime.now());
-        when(cancellationService.cancel(appointment.getId())).thenReturn(appointment);
+        when(cancellationService.cancel(appointment.getId(), "PAT-0001")).thenReturn(appointment);
 
-        mockMvc.perform(post("/api/appointments/{id}/cancel", appointment.getId()))
+        mockMvc.perform(post("/api/appointments/{id}/cancel", appointment.getId())
+                        .param("patientId", "PAT-0001"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("CANCELLED"));
     }
@@ -202,20 +203,22 @@ class AppointmentControllerTest {
     @Test
     void cancelReturns404WhenAppointmentUnknown() throws Exception {
         UUID unknownId = UUID.randomUUID();
-        when(cancellationService.cancel(unknownId))
+        when(cancellationService.cancel(unknownId, "PAT-0001"))
                 .thenThrow(new AppointmentNotFoundException("Unknown appointment: " + unknownId));
 
-        mockMvc.perform(post("/api/appointments/{id}/cancel", unknownId))
+        mockMvc.perform(post("/api/appointments/{id}/cancel", unknownId)
+                        .param("patientId", "PAT-0001"))
                 .andExpect(status().isNotFound());
     }
 
     @Test
     void cancelReturns409WhenAlreadyCancelled() throws Exception {
         UUID id = UUID.randomUUID();
-        when(cancellationService.cancel(id))
+        when(cancellationService.cancel(id, "PAT-0001"))
                 .thenThrow(new AppointmentAlreadyCancelledException("Appointment already cancelled: " + id));
 
-        mockMvc.perform(post("/api/appointments/{id}/cancel", id))
+        mockMvc.perform(post("/api/appointments/{id}/cancel", id)
+                        .param("patientId", "PAT-0001"))
                 .andExpect(status().isConflict());
     }
 

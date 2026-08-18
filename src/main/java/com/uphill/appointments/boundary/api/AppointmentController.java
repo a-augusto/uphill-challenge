@@ -74,10 +74,13 @@ public class AppointmentController {
         return ResponseEntity.status(HttpStatus.CREATED).body(body);
     }
 
-    @Operation(summary = "Cancel an appointment, freeing its doctor/room/slot for rebooking")
+    @Operation(summary = "Cancel an appointment, freeing its doctor/room/slot for rebooking. patientId must match "
+            + "the patient the appointment was booked under — there is no login, so this is the only thing "
+            + "stopping someone who merely learned the appointment id from cancelling someone else's booking.")
     @PostMapping("/api/appointments/{id}/cancel")
-    public ResponseEntity<AppointmentResponse> cancel(@PathVariable UUID id) {
-        Appointment appointment = cancellationService.cancel(id);
+    public ResponseEntity<AppointmentResponse> cancel(
+            @PathVariable UUID id, @RequestParam String patientId) {
+        Appointment appointment = cancellationService.cancel(id, patientId);
         return ResponseEntity.ok(AppointmentResponse.from(appointment));
     }
 

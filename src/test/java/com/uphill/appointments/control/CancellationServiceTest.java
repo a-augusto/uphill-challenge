@@ -20,6 +20,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
 
 import com.uphill.appointments.entity.Appointment;
+import com.uphill.appointments.entity.Patient;
 import com.uphill.appointments.entity.enums.AppointmentStatus;
 import com.uphill.appointments.entity.repository.AppointmentRepository;
 
@@ -72,5 +73,29 @@ class CancellationServiceTest {
 
         assertThatThrownBy(() -> cancellationService.cancel(appointmentId))
                 .isInstanceOf(AppointmentAlreadyCancelledException.class);
+    }
+
+    @Test
+    void ownedCancelSucceedsWhenPatientIdMatches() {
+        Patient patient = new Patient();
+        patient.setPatientId("PAT-0001");
+        appointment.setPatient(patient);
+        when(appointmentRepository.findById(appointmentId)).thenReturn(Optional.of(appointment));
+        when(appointmentRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Appointment result = cancellationService.cancel(appointmentId, "PAT-0001");
+
+        assertThat(result.getStatus()).isEqualTo(AppointmentStatus.CANCELLED);
+    }
+
+    @Test
+    void ownedCancelThrowsNotFoundWhenPatientIdDoesNotMatch() {
+        Patient patient = new Patient();
+        patient.setPatientId("PAT-0001");
+        appointment.setPatient(patient);
+        when(appointmentRepository.findById(appointmentId)).thenReturn(Optional.of(appointment));
+
+        assertThatThrownBy(() -> cancellationService.cancel(appointmentId, "PAT-9999"))
+                .isInstanceOf(AppointmentNotFoundException.class);
     }
 }

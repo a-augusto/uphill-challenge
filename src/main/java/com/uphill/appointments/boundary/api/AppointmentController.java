@@ -91,7 +91,8 @@ public class AppointmentController {
         Specification<Appointment> spec = Specification.allOf(Stream.of(
                         AppointmentSpecifications.hasSpecialtyCode(specialty),
                         AppointmentSpecifications.startsAtFrom(from),
-                        AppointmentSpecifications.startsAtTo(to))
+                        AppointmentSpecifications.startsAtTo(to),
+                        AppointmentSpecifications.fetchAssociationsForListing())
                 .filter(Objects::nonNull)
                 .toList());
         return appointmentRepository.findAll(spec, pageable).map(AppointmentResponse::from);

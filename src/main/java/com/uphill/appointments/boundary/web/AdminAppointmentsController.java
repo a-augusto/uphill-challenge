@@ -73,7 +73,10 @@ class AdminAppointmentsController {
     String list(@RequestParam(required = false) String specialty, @RequestParam(defaultValue = "0") int page,
             Model model) {
         Specification<Appointment> spec = Specification.allOf(
-                Stream.of(AppointmentSpecifications.hasSpecialtyCode(specialty)).filter(Objects::nonNull).toList());
+                Stream.of(AppointmentSpecifications.hasSpecialtyCode(specialty),
+                                AppointmentSpecifications.fetchAssociationsForListing())
+                        .filter(Objects::nonNull)
+                        .toList());
         Page<AppointmentRow> appointments = appointmentRepository
                 .findAll(spec, PageRequest.of(page, PAGE_SIZE))
                 .map(AppointmentResponse::from)

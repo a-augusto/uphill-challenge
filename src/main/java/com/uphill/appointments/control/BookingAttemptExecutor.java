@@ -16,6 +16,7 @@ import com.uphill.appointments.entity.Specialty;
 import com.uphill.appointments.entity.repository.AppointmentRepository;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * Persists a single candidate (doctor, room) booking attempt in its own,
@@ -49,6 +50,7 @@ import lombok.RequiredArgsConstructor;
  */
 @Component
 @RequiredArgsConstructor
+@Slf4j
 class BookingAttemptExecutor {
 
     private final AppointmentRepository appointmentRepository;
@@ -58,6 +60,8 @@ class BookingAttemptExecutor {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     Appointment attemptBook(
             Doctor doctor, Room room, Specialty specialty, Patient patient, OffsetDateTime startsAt, OffsetDateTime endsAt) {
+        log.debug("Attempting doctor {} room {} for specialty {} at {}",
+                doctor.getId(), room.getId(), specialty.getCode(), startsAt);
         Appointment appointment = new Appointment();
         appointment.setPatient(patient);
         appointment.setSpecialty(specialty);
@@ -79,6 +83,8 @@ class BookingAttemptExecutor {
         }
 
         eventPublisher.publishEvent(new AppointmentBookedEvent(saved));
+        log.info("Booked appointment {} (doctor {}, room {}, patient {}) for {}",
+                saved.getId(), doctor.getId(), room.getId(), patient.getPatientId(), startsAt);
         return saved;
     }
 }

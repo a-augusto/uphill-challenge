@@ -51,6 +51,12 @@ public class KafkaDoctorCalendarClient implements DoctorCalendarClient {
                         log.error(
                                 "Failed to publish doctor-calendar {} event for appointment {}",
                                 event.type(), event.appointmentId(), ex);
+                    } else {
+                        // The one place that reflects genuine broker acknowledgment, not just
+                        // "dispatched" - the send() call above returns immediately either way.
+                        log.info(
+                                "Published doctor-calendar {} event for appointment {}",
+                                event.type(), event.appointmentId());
                     }
                 });
     }

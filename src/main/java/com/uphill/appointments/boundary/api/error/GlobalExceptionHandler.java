@@ -28,50 +28,63 @@ public class GlobalExceptionHandler {
         String message = ex.getBindingResult().getFieldErrors().stream()
                 .map(fieldError -> fieldError.getField() + ": " + fieldError.getDefaultMessage())
                 .collect(Collectors.joining(", "));
-        return build(HttpStatus.BAD_REQUEST, message, request);
+        return build(HttpStatus.BAD_REQUEST, message, request, ex);
     }
 
     @ExceptionHandler(SlotValidationException.class)
     public ResponseEntity<ErrorResponse> handleSlotValidation(SlotValidationException ex, WebRequest request) {
-        return build(HttpStatus.BAD_REQUEST, ex.getMessage(), request);
+        return build(HttpStatus.BAD_REQUEST, ex.getMessage(), request, ex);
     }
 
     @ExceptionHandler(AppointmentAllocationException.class)
     public ResponseEntity<ErrorResponse> handleAllocation(AppointmentAllocationException ex, WebRequest request) {
-        return build(HttpStatus.CONFLICT, ex.getMessage(), request);
+        return build(HttpStatus.CONFLICT, ex.getMessage(), request, ex);
     }
 
     @ExceptionHandler(PatientNotFoundException.class)
     public ResponseEntity<ErrorResponse> handlePatientNotFound(PatientNotFoundException ex, WebRequest request) {
-        return build(HttpStatus.NOT_FOUND, ex.getMessage(), request);
+        return build(HttpStatus.NOT_FOUND, ex.getMessage(), request, ex);
     }
 
     @ExceptionHandler(AppointmentNotFoundException.class)
     public ResponseEntity<ErrorResponse> handleAppointmentNotFound(AppointmentNotFoundException ex, WebRequest request) {
-        return build(HttpStatus.NOT_FOUND, ex.getMessage(), request);
+        return build(HttpStatus.NOT_FOUND, ex.getMessage(), request, ex);
     }
 
     @ExceptionHandler(AppointmentAlreadyCancelledException.class)
     public ResponseEntity<ErrorResponse> handleAlreadyCancelled(
             AppointmentAlreadyCancelledException ex, WebRequest request) {
-        return build(HttpStatus.CONFLICT, ex.getMessage(), request);
+        return build(HttpStatus.CONFLICT, ex.getMessage(), request, ex);
     }
 
     @ExceptionHandler(RoomAvailabilityCheckFailedException.class)
     public ResponseEntity<ErrorResponse> handleRoomAvailabilityCheckFailed(
             RoomAvailabilityCheckFailedException ex, WebRequest request) {
-        log.warn("Room availability check failed", ex);
-        return build(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), request);
+        return build(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), request, ex);
     }
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleUnexpected(Exception ex, WebRequest request) {
-        log.error("Unhandled exception", ex);
-        return build(HttpStatus.INTERNAL_SERVER_ERROR, "An unexpected error occurred", request);
+        return build(HttpStatus.INTERNAL_SERVER_ERROR, "An unexpected error occurred", request, ex);
     }
 
-    private ResponseEntity<ErrorResponse> build(HttpStatus status, String message, WebRequest request) {
+    /**
+     * Every error response - and its log line - funnels through here, so the
+     * log level always matches the status: client errors are routine (INFO),
+     * an external system misbehaving is an operational signal (WARN), and
+     * anything else genuinely unexpected (ERROR). Logging every outcome at
+     * WARN/ERROR would make those levels useless for alerting - most 4xx
+     * responses here are normal business outcomes, not problems.
+     */
+    private ResponseEntity<ErrorResponse> build(HttpStatus status, String message, WebRequest request, Exception ex) {
         String path = request.getDescription(false).replace("uri=", "");
+        if (status == HttpStatus.SERVICE_UNAVAILABLE) {
+            log.warn("{} -> {} {}: {}", path, status.value(), status.getReasonPhrase(), message, ex);
+        } else if (status.is5xxServerError()) {
+            log.error("{} -> {} {}: {}", path, status.value(), status.getReasonPhrase(), message, ex);
+        } else {
+            log.info("{} -> {} {}: {}", path, status.value(), status.getReasonPhrase(), message);
+        }
         ErrorResponse body = ErrorResponse.of(status.value(), status.getReasonPhrase(), message, path);
         return ResponseEntity.status(status).body(body);
     }

@@ -222,6 +222,10 @@ Once running:
   directly in console log lines once tracing is active — Boot's default
   correlation pattern, no config needed for that part. Log export to Loki
   doesn't work yet — see **Known gaps** below.
+- Logging is INFO by default (routine outcomes: bookings, cancellations,
+  4xx client errors) with DEBUG-level tracing available for the fine-grained
+  stuff (candidate attempts, best-effort dispatch confirmation) — add
+  `--logging.level.com.uphill.appointments=DEBUG` to see it locally.
 - Health check: `curl http://localhost:8080/actuator/health`
 
 ### Example request

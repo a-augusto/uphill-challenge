@@ -874,3 +874,61 @@ while the metrics exporter explicitly logs its own publish schedule at
 startup and the trace exporter visibly works. Traces and metrics — the two
 higher-value signals — are fully confirmed; OTLP log export needs further
 investigation as a follow-up, not treated as done.
+
+### 029 — Logging: filled the gaps, no separate correlation mechanism needed
+6 of 8 `GlobalExceptionHandler` handlers logged nothing at all; several
+post-booking/cancellation actions only logged on failure, never success;
+no request correlation. Originally scoped to include a request-id
+mechanism, but #028 (observability) already solved that for free — Spring
+Boot auto-injects trace/span IDs into every console log line once tracing
+is active, confirmed live before starting this. So the actual scope
+narrowed to: fill the gaps, apply a coherent level policy.
+
+**Level policy**: INFO for routine/expected outcomes (successful bookings/
+cancellations/post-actions, and every 400/404/409 — these are normal
+request outcomes, not bugs; logging them at WARN/ERROR would make those
+levels useless for alerting given how often they'd fire under ordinary
+client behavior). WARN stays reserved for external systems misbehaving
+(unchanged). ERROR stays reserved for genuinely unexpected failures
+(unchanged). DEBUG for fine-grained tracing, silent by default.
+
+**`GlobalExceptionHandler`**: centralized logging into the existing private
+`build()` helper — log level now derives from the HTTP status
+(`SERVICE_UNAVAILABLE` → WARN, other 5xx → ERROR, else → INFO) — instead of
+each handler managing its own (or, for 6 of 8, not logging at all). The two
+previously-standalone `log.warn`/`log.error` calls were folded in, not
+duplicated.
+
+**Success-path logging added** to `CancellationService` (had none at all),
+`BookingAttemptExecutor` (had none at all — this is the actual point of
+persistence for a successful booking, both `book` and `bookOnDay` funnel
+through it, so it's the one correct place for that log line rather than
+duplicating it per entry point), and `KafkaDoctorCalendarClient` (INFO on
+real broker acknowledgment — distinct from "dispatched," since `send()`
+returns before the broker responds).
+
+**`AppointmentEventListener`'s new dispatch-confirmation line is
+deliberately DEBUG, not INFO**: it only means the call didn't throw
+synchronously, which isn't the same as real delivery confirmation for the
+async Kafka publish (that's `KafkaDoctorCalendarClient`'s own INFO line,
+which fires later) and would double-log the email case, which
+`EmailNotificationService` already confirms at INFO. Verified live: booking
+now produces a debug attempt line, an info "booked" line from
+`BookingAttemptExecutor`, a debug dispatch line and a real info publish
+confirmation for the Kafka event, and the existing email confirmation —
+each at the right level, all sharing the same trace ID automatically.
+
+**Verified live that the #026 asymmetry still holds**: an external
+availability-check failure during booking logs a WARN (with the original
+cause) and returns 409 (`AppointmentAllocationException`, per #026 — 503 is
+reserved for the preview endpoint); hitting `GET /api/rooms/availability`
+during the same failure correctly returns its own 503 with its own WARN
+log. Two different endpoints, same underlying failure, deliberately
+different status codes and both logged appropriately — exactly as decided.
+
+**Deferred, not forgotten**: structured/JSON log format for production
+(`logging.structured.format.console`, built into Spring Boot). Naturally a
+per-environment concern, and there's no dev/prod profile split in this
+codebase yet — #030 (email templating) is about to introduce one. Adding
+structured logging now would mean inventing that split early for an
+unrelated feature.

@@ -12,6 +12,7 @@ import com.uphill.appointments.entity.AppointmentStatus;
 import com.uphill.appointments.entity.repository.AppointmentRepository;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * Cancels an existing appointment. Unlike {@link BookingService}, this isn't
@@ -21,6 +22,7 @@ import lombok.RequiredArgsConstructor;
  */
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class CancellationService {
 
     private final AppointmentRepository appointmentRepository;
@@ -39,6 +41,7 @@ public class CancellationService {
         Appointment saved = appointmentRepository.save(appointment);
 
         eventPublisher.publishEvent(new AppointmentCancelledEvent(saved));
+        log.info("Cancelled appointment {}", appointmentId);
         return saved;
     }
 }

@@ -77,6 +77,12 @@ public class AppointmentEventListener {
     private void runBestEffort(String actionName, Appointment appointment, Runnable action) {
         try {
             action.run();
+            // DEBUG, not INFO: this only means the call didn't throw synchronously -
+            // the real answer for the async Kafka publish lands later, in
+            // KafkaDoctorCalendarClient's own callback, and EmailNotificationService
+            // already logs its own INFO-level confirmation. This line is just a
+            // low-level dispatch trace, not a delivery confirmation.
+            log.debug("Post-action '{}' dispatched for appointment {}", actionName, appointment.getId());
         } catch (Exception e) {
             log.error("Post-action '{}' failed for appointment {}", actionName, appointment.getId(), e);
         }
